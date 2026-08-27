@@ -1,0 +1,2 @@
+[alias]
+build-app = ["run", "--bin", "build-app"]
