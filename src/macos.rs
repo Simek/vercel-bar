@@ -417,83 +417,85 @@ fn show_settings_modal(controller: id) -> Result<()> {
         let _: () = msg_send![app, activateIgnoringOtherApps: YES];
         let window: id = msg_send![class!(NSWindow), alloc];
         let window: id = msg_send![window, initWithContentRect: NSRect::new(
-            cocoa::foundation::NSPoint::new(0.0, 0.0), NSSize::new(460.0, 300.0)
-        ) styleMask: 1u64 backing: 2u64 defer: NO];
+            cocoa::foundation::NSPoint::new(0.0, 0.0), NSSize::new(460.0, 290.0)
+        ) styleMask: (1u64 | 2u64) backing: 2u64 defer: NO];
         let _: () = msg_send![window, setTitle: ns_string("Settings")];
+        let _: () = msg_send![window, setReleasedWhenClosed: NO];
+        let close_button: id = msg_send![window, standardWindowButton: 2i64];
+        let _: () = msg_send![close_button, setTarget: controller];
+        let _: () = msg_send![close_button, setAction: sel!(settingsCancel:)];
         let _: () = msg_send![window, center];
         let content: id = msg_send![window, contentView];
+
+        let account_label: id = msg_send![class!(NSTextField), labelWithString: ns_string("Vercel Account")];
+        let _: () = msg_send![account_label, setFrame: NSRect::new(
+            cocoa::foundation::NSPoint::new(20.0, 246.0), NSSize::new(280.0, 22.0)
+        )];
+        let heading_font: id = msg_send![class!(NSFont), systemFontOfSize: 13.0f64 weight: 0.4f64];
+        let _: () = msg_send![account_label, setFont: heading_font];
+        let _: () = msg_send![content, addSubview: account_label];
         let label: id = msg_send![class!(NSTextField), labelWithString: ns_string(
             "Vercel token (used to load teams and projects):"
         )];
         let _: () = msg_send![label, setFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(24.0, 242.0), NSSize::new(412.0, 24.0)
+            cocoa::foundation::NSPoint::new(20.0, 220.0), NSSize::new(420.0, 20.0)
         )];
+        let secondary_color: id = msg_send![class!(NSColor), secondaryLabelColor];
+        let _: () = msg_send![label, setTextColor: secondary_color];
         let _: () = msg_send![content, addSubview: label];
-        let scroll_view: id = msg_send![class!(NSScrollView), alloc];
-        let scroll_view: id = msg_send![scroll_view, initWithFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(24.0, 154.0), NSSize::new(412.0, 80.0)
-        )];
-        let _: () = msg_send![scroll_view, setHasVerticalScroller: YES];
-        let _: () = msg_send![scroll_view, setBorderType: 2i64];
+
         let text_field: id = msg_send![class!(NSSecureTextField), alloc];
         let text_field: id = msg_send![text_field, initWithFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(0.0, 0.0), NSSize::new(396.0, 80.0)
+            cocoa::foundation::NSPoint::new(20.0, 176.0), NSSize::new(420.0, 40.0)
         )];
         let _: () = msg_send![text_field, setEditable: YES];
         let _: () = msg_send![text_field, setSelectable: YES];
-        let _: () = msg_send![text_field, setUsesSingleLineMode: YES];
-        let _: () = msg_send![scroll_view, setDocumentView: text_field];
+        let _: () = msg_send![text_field, setPlaceholderString: ns_string("Paste a Vercel token")];
         if let Some(token) = load_token()? {
             let _: () = msg_send![text_field, setStringValue: ns_string(&token)];
         }
-        let _: () = msg_send![content, addSubview: scroll_view];
-        let sort_label: id = msg_send![class!(NSTextField), labelWithString: ns_string("Projects sort order:")];
+        let _: () = msg_send![content, addSubview: text_field];
+
+        let display_label: id = msg_send![class!(NSTextField), labelWithString: ns_string("Project Display")];
+        let _: () = msg_send![display_label, setFrame: NSRect::new(
+            cocoa::foundation::NSPoint::new(20.0, 128.0), NSSize::new(420.0, 22.0)
+        )];
+        let _: () = msg_send![display_label, setFont: heading_font];
+        let _: () = msg_send![content, addSubview: display_label];
+        let sort_label: id = msg_send![class!(NSTextField), labelWithString: ns_string("Projects sort order")];
         let _: () = msg_send![sort_label, setFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(24.0, 116.0), NSSize::new(180.0, 24.0)
+            cocoa::foundation::NSPoint::new(20.0, 99.0), NSSize::new(140.0, 22.0)
         )];
         let _: () = msg_send![content, addSubview: sort_label];
         let sort_popup: id = msg_send![class!(NSPopUpButton), alloc];
         let sort_popup: id = msg_send![sort_popup, initWithFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(200.0, 112.0), NSSize::new(235.0, 28.0)
+            cocoa::foundation::NSPoint::new(235.0, 95.0), NSSize::new(205.0, 28.0)
         ) pullsDown: NO];
         let _: () = msg_send![sort_popup, addItemWithTitle: ns_string("Last deployment date")];
         let _: () = msg_send![sort_popup, addItemWithTitle: ns_string("Alphabetically")];
         let _: () = msg_send![sort_popup, selectItemAtIndex: project_sort_order()];
         let _: () = msg_send![content, addSubview: sort_popup];
-        for (title, frame, action) in [
-            (
-                "Save",
-                NSRect::new(
-                    cocoa::foundation::NSPoint::new(345.0, 35.0),
-                    NSSize::new(90.0, 30.0),
-                ),
-                sel!(settingsSave:),
-            ),
-            (
-                "Cancel",
-                NSRect::new(
-                    cocoa::foundation::NSPoint::new(250.0, 35.0),
-                    NSSize::new(90.0, 30.0),
-                ),
-                sel!(settingsCancel:),
-            ),
-            (
-                "Clear Token",
-                NSRect::new(
-                    cocoa::foundation::NSPoint::new(24.0, 35.0),
-                    NSSize::new(110.0, 30.0),
-                ),
-                sel!(settingsClear:),
-            ),
-        ] {
-            let button: id = msg_send![class!(NSButton), buttonWithTitle: ns_string(title) target: controller action: action];
-            let _: () = msg_send![button, setFrame: frame];
-            if title == "Save" {
-                let _: () = msg_send![button, setKeyEquivalent: ns_string("\r")];
-                let _: () = msg_send![button, setKeyEquivalentModifierMask: 0u64];
-            }
-            let _: () = msg_send![content, addSubview: button];
-        }
+
+        let clear: id = msg_send![class!(NSButton), buttonWithTitle: ns_string("Clear Token") target: controller action: sel!(settingsClear:)];
+        let _: () = msg_send![clear, setFrame: NSRect::new(
+            cocoa::foundation::NSPoint::new(330.0, 246.0), NSSize::new(110.0, 28.0)
+        )];
+        let cancel: id = msg_send![class!(NSButton), buttonWithTitle: ns_string("Cancel") target: controller action: sel!(settingsCancel:)];
+        let _: () = msg_send![cancel, setFrame: NSRect::new(
+            cocoa::foundation::NSPoint::new(295.0, 20.0), NSSize::new(65.0, 32.0)
+        )];
+        let save: id = msg_send![class!(NSButton), buttonWithTitle: ns_string("Save") target: controller action: sel!(settingsSave:)];
+        let _: () = msg_send![save, setFrame: NSRect::new(
+            cocoa::foundation::NSPoint::new(370.0, 20.0), NSSize::new(70.0, 32.0)
+        )];
+        let _: () = msg_send![save, setKeyEquivalent: ns_string("\r")];
+        let _: () = msg_send![save, setKeyEquivalentModifierMask: 0u64];
+        let _: () = msg_send![cancel, setKeyEquivalent: ns_string("\u{1b}")];
+        let _: () = msg_send![cancel, setKeyEquivalentModifierMask: 0u64];
+        let _: () = msg_send![save, setBezelStyle: 1i64];
+        let _: () = msg_send![content, addSubview: cancel];
+        let _: () = msg_send![content, addSubview: save];
+        let _: () = msg_send![content, addSubview: clear];
         SETTINGS_WINDOW.store(window as usize, Ordering::Relaxed);
         SETTINGS_FIELD.store(text_field as usize, Ordering::Relaxed);
         SETTINGS_SORT.store(sort_popup as usize, Ordering::Relaxed);
