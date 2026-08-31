@@ -37,12 +37,6 @@ pub enum DeploymentStatus {
     Missing,
 }
 
-impl DeploymentStatus {
-    pub fn indicator(&self) -> &'static str {
-        "●"
-    }
-}
-
 pub struct VercelClient {
     client: Client,
 }

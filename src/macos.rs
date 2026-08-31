@@ -6,7 +6,7 @@ use cocoa::appkit::{
     NSVariableStatusItemLength,
 };
 use cocoa::base::{NO, YES, id, nil};
-use cocoa::foundation::{NSAutoreleasePool, NSRange, NSRect, NSSize, NSString};
+use cocoa::foundation::{NSAutoreleasePool, NSRect, NSSize, NSString};
 use keyring::Entry;
 use objc::declare::ClassDecl;
 use objc::runtime::{Class, Object, Sel};
@@ -257,7 +257,18 @@ unsafe fn populate_error_menu(menu: id, controller: id, message: &str) {
 
 unsafe fn add_team_menu(menu: id, controller: id, team: &TeamSnapshot) {
     add_separator(menu);
-    add_static_item(menu, &format!("{} ({})", team.name, team.projects.len()));
+    let title = format!("{} ({})", team.name, team.projects.len());
+    let item = make_menu_item(&title);
+    let image: id = msg_send![
+        class!(NSImage),
+        imageWithSystemSymbolName: ns_string("folder")
+        accessibilityDescription: ns_string("Team")
+    ];
+    if image != nil {
+        let _: () = msg_send![item, setImage: image];
+    }
+    let _: () = msg_send![item, setEnabled: NO];
+    let _: () = msg_send![menu, addItem: item];
     let mut projects = team.projects.clone();
     if project_sort_order() == SORT_ALPHABETICAL {
         projects.sort_by(|left, right| left.name.to_ascii_lowercase().cmp(&right.name.to_ascii_lowercase()));
@@ -270,47 +281,59 @@ unsafe fn add_team_menu(menu: id, controller: id, team: &TeamSnapshot) {
 }
 
 unsafe fn add_project_menu(menu: id, controller: id, project: &ProjectSnapshot) {
-    let title = format!("{} {}", project.latest_status.indicator(), project.name);
+    let title = project.name.clone();
     let project_item = make_menu_item(&title);
-    let _: () = msg_send![
-        project_item,
-        setAttributedTitle: colored_title(&title, &project.latest_status)
-    ];
+    let status_color: id = match project.latest_status {
+        crate::vercel::DeploymentStatus::Healthy => msg_send![class!(NSColor), systemGreenColor],
+        crate::vercel::DeploymentStatus::Failed => msg_send![class!(NSColor), systemRedColor],
+        crate::vercel::DeploymentStatus::Pending => msg_send![class!(NSColor), systemOrangeColor],
+        crate::vercel::DeploymentStatus::Missing => msg_send![class!(NSColor), secondaryLabelColor],
+    };
+    let status_image = colored_symbol_image(
+        match project.latest_status {
+            crate::vercel::DeploymentStatus::Healthy => "checkmark.circle.fill",
+            crate::vercel::DeploymentStatus::Failed => "xmark.circle.fill",
+            crate::vercel::DeploymentStatus::Pending => "circle.dotted",
+            crate::vercel::DeploymentStatus::Missing => "circle",
+        },
+        status_color,
+        "Deployment status",
+    );
+    if status_image != nil {
+        let _: () = msg_send![project_item, setImage: status_image];
+    }
+
+    unsafe fn colored_symbol_image(symbol: &str, color: id, description: &str) -> id {
+        let image: id = msg_send![
+            class!(NSImage),
+            imageWithSystemSymbolName: ns_string(symbol)
+            accessibilityDescription: ns_string(description)
+        ];
+        if image == nil {
+            return nil;
+        }
+        let configuration: id = msg_send![
+            class!(NSImageSymbolConfiguration),
+            configurationWithHierarchicalColor: color
+        ];
+        let configured: id = msg_send![image, imageWithSymbolConfiguration: configuration];
+        if configured == nil { image } else { configured }
+    }
     let project_menu = NSMenu::new(nil);
     let _: () = msg_send![project_menu, setAutoenablesItems: NO];
 
-    add_static_item(project_menu, &project.latest_status_label);
+    add_deployment_item(project_menu, &project.latest_status_label);
     add_separator(project_menu);
+
+    add_url_item(
+        project_menu,
+        "Open project dashboard",
+        &project.dashboard_url,
+        controller,
+    );
 
     if let Some(url) = &project.latest_deployment_url {
         add_url_item(project_menu, "Open latest deployment", url, controller);
-    }
-
-    unsafe fn colored_title(title: &str, status: &crate::vercel::DeploymentStatus) -> id {
-        let color: id = match status {
-            crate::vercel::DeploymentStatus::Healthy => {
-                msg_send![class!(NSColor), systemGreenColor]
-            }
-            crate::vercel::DeploymentStatus::Failed => msg_send![class!(NSColor), systemRedColor],
-            crate::vercel::DeploymentStatus::Pending => {
-                msg_send![class!(NSColor), systemOrangeColor]
-            }
-            crate::vercel::DeploymentStatus::Missing => {
-                msg_send![class!(NSColor), secondaryLabelColor]
-            }
-        };
-        let attributed: id = msg_send![class!(NSMutableAttributedString), alloc];
-        let attributed: id = msg_send![
-            attributed,
-            initWithString: ns_string(title)
-        ];
-        let _: () = msg_send![
-            attributed,
-            addAttribute: ns_string("NSColor")
-            value: color
-            range: NSRange::new(0, 1)
-        ];
-        attributed
     }
 
     add_url_item(
@@ -319,14 +342,9 @@ unsafe fn add_project_menu(menu: id, controller: id, project: &ProjectSnapshot) 
         &project.logs_url,
         controller,
     );
-    add_url_item(
-        project_menu,
-        "Open project dashboard",
-        &project.dashboard_url,
-        controller,
-    );
     if let Some(url) = &project.production_url {
-        add_url_item(project_menu, "Open production site", url, controller);
+        add_separator(project_menu);
+        add_url_item(project_menu, "Visit production site", url, controller);
     }
 
     let _: () = msg_send![project_item, setSubmenu: project_menu];
@@ -382,6 +400,21 @@ unsafe fn add_static_item(menu: id, title: &str) {
     let _: () = msg_send![menu, addItem: item];
 }
 
+unsafe fn add_deployment_item(menu: id, label: &str) {
+    let title = label.strip_prefix("Deployment: ").unwrap_or(label);
+    let item = make_menu_item(title);
+    let image: id = msg_send![
+        class!(NSImage),
+        imageWithSystemSymbolName: ns_string("calendar")
+        accessibilityDescription: ns_string("Deployment date")
+    ];
+    if image != nil {
+        let _: () = msg_send![item, setImage: image];
+    }
+    let _: () = msg_send![item, setEnabled: NO];
+    let _: () = msg_send![menu, addItem: item];
+}
+
 unsafe fn add_action_item(menu: id, title: &str, action: Sel, controller: id) {
     let item = NSMenuItem::alloc(nil).initWithTitle_action_keyEquivalent_(
         ns_string(title),
@@ -389,6 +422,22 @@ unsafe fn add_action_item(menu: id, title: &str, action: Sel, controller: id) {
         ns_string(""),
     );
     let _: () = msg_send![item, setTarget: controller];
+    let symbol = match title {
+        "Refresh" => Some("arrow.clockwise"),
+        "Settings…" => Some("gearshape"),
+        "Quit" => Some("power"),
+        _ => None,
+    };
+    if let Some(symbol) = symbol {
+        let image: id = msg_send![
+            class!(NSImage),
+            imageWithSystemSymbolName: ns_string(symbol)
+            accessibilityDescription: ns_string(title)
+        ];
+        if image != nil {
+            let _: () = msg_send![item, setImage: image];
+        }
+    }
     let _: () = msg_send![menu, addItem: item];
 }
 
