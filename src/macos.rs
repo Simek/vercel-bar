@@ -27,6 +27,7 @@ use crate::vercel::{AppSnapshot, ProjectSnapshot, TeamSnapshot, VercelClient};
 
 const KEYRING_SERVICE: &str = "dev-tree";
 const KEYRING_ACCOUNT: &str = "vercel-token";
+const TOKEN_DEFAULTS_KEY: &str = "vercelToken";
 const SETTINGS_SAVE: i64 = 1;
 const SETTINGS_CLEAR: i64 = 2;
 const PROJECT_SORT_KEY: &str = "projectSortOrder";
@@ -66,6 +67,14 @@ pub fn run() {
         populate_loading_menu(menu, controller);
         let _: () = msg_send![status_item, setMenu: menu];
         APP_MENU.store(menu as usize, Ordering::Relaxed);
+        let _: id = msg_send![
+            class!(NSTimer),
+            scheduledTimerWithTimeInterval: 0.01f64
+            target: controller
+            selector: sel!(loadMenu:)
+            userInfo: menu
+            repeats: NO
+        ];
         let _: id = msg_send![class!(NSTimer), scheduledTimerWithTimeInterval: 300.0f64 target: controller selector: sel!(autoRefresh:) userInfo: nil repeats: YES];
 
         let lifetime = Box::new(AppLifetime {
@@ -129,7 +138,7 @@ extern "C" fn refresh_menu(this: &Object, _: Sel, sender: id) {
 
 extern "C" fn open_settings(this: &Object, _: Sel, _: id) {
     unsafe {
-        match show_settings_modal() {
+        match show_settings_modal(this as *const _ as id) {
             Ok(()) => {
                 let menu = APP_MENU.load(Ordering::Relaxed) as id;
                 if menu != nil {
@@ -402,13 +411,13 @@ unsafe fn make_menu_item(title: &str) -> id {
     )
 }
 
-fn show_settings_modal() -> Result<()> {
+fn show_settings_modal(controller: id) -> Result<()> {
     unsafe {
         let app = NSApp();
         let _: () = msg_send![app, activateIgnoringOtherApps: YES];
         let window: id = msg_send![class!(NSWindow), alloc];
         let window: id = msg_send![window, initWithContentRect: NSRect::new(
-            cocoa::foundation::NSPoint::new(0.0, 0.0), NSSize::new(460.0, 230.0)
+            cocoa::foundation::NSPoint::new(0.0, 0.0), NSSize::new(460.0, 300.0)
         ) styleMask: 1u64 backing: 2u64 defer: NO];
         let _: () = msg_send![window, setTitle: ns_string("Settings")];
         let _: () = msg_send![window, center];
@@ -417,36 +426,45 @@ fn show_settings_modal() -> Result<()> {
             "Vercel token (used to load teams and projects):"
         )];
         let _: () = msg_send![label, setFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(24.0, 172.0), NSSize::new(412.0, 24.0)
+            cocoa::foundation::NSPoint::new(24.0, 242.0), NSSize::new(412.0, 24.0)
         )];
         let _: () = msg_send![content, addSubview: label];
+        let scroll_view: id = msg_send![class!(NSScrollView), alloc];
+        let scroll_view: id = msg_send![scroll_view, initWithFrame: NSRect::new(
+            cocoa::foundation::NSPoint::new(24.0, 154.0), NSSize::new(412.0, 80.0)
+        )];
+        let _: () = msg_send![scroll_view, setHasVerticalScroller: YES];
+        let _: () = msg_send![scroll_view, setBorderType: 2i64];
         let text_field: id = msg_send![class!(NSSecureTextField), alloc];
         let text_field: id = msg_send![text_field, initWithFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(24.0, 134.0), NSSize::new(412.0, 28.0)
+            cocoa::foundation::NSPoint::new(0.0, 0.0), NSSize::new(396.0, 80.0)
         )];
+        let _: () = msg_send![text_field, setEditable: YES];
+        let _: () = msg_send![text_field, setSelectable: YES];
+        let _: () = msg_send![text_field, setUsesSingleLineMode: YES];
+        let _: () = msg_send![scroll_view, setDocumentView: text_field];
         if let Some(token) = load_token()? {
             let _: () = msg_send![text_field, setStringValue: ns_string(&token)];
         }
-        let _: () = msg_send![content, addSubview: text_field];
+        let _: () = msg_send![content, addSubview: scroll_view];
         let sort_label: id = msg_send![class!(NSTextField), labelWithString: ns_string("Projects sort order:")];
         let _: () = msg_send![sort_label, setFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(24.0, 96.0), NSSize::new(180.0, 24.0)
+            cocoa::foundation::NSPoint::new(24.0, 116.0), NSSize::new(180.0, 24.0)
         )];
         let _: () = msg_send![content, addSubview: sort_label];
         let sort_popup: id = msg_send![class!(NSPopUpButton), alloc];
         let sort_popup: id = msg_send![sort_popup, initWithFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(200.0, 92.0), NSSize::new(235.0, 28.0)
+            cocoa::foundation::NSPoint::new(200.0, 112.0), NSSize::new(235.0, 28.0)
         ) pullsDown: NO];
         let _: () = msg_send![sort_popup, addItemWithTitle: ns_string("Last deployment date")];
         let _: () = msg_send![sort_popup, addItemWithTitle: ns_string("Alphabetically")];
         let _: () = msg_send![sort_popup, selectItemAtIndex: project_sort_order()];
         let _: () = msg_send![content, addSubview: sort_popup];
-        let controller = new_controller();
         for (title, frame, action) in [
             (
                 "Save",
                 NSRect::new(
-                    cocoa::foundation::NSPoint::new(250.0, 20.0),
+                    cocoa::foundation::NSPoint::new(345.0, 35.0),
                     NSSize::new(90.0, 30.0),
                 ),
                 sel!(settingsSave:),
@@ -454,7 +472,7 @@ fn show_settings_modal() -> Result<()> {
             (
                 "Cancel",
                 NSRect::new(
-                    cocoa::foundation::NSPoint::new(345.0, 20.0),
+                    cocoa::foundation::NSPoint::new(250.0, 35.0),
                     NSSize::new(90.0, 30.0),
                 ),
                 sel!(settingsCancel:),
@@ -462,7 +480,7 @@ fn show_settings_modal() -> Result<()> {
             (
                 "Clear Token",
                 NSRect::new(
-                    cocoa::foundation::NSPoint::new(24.0, 20.0),
+                    cocoa::foundation::NSPoint::new(24.0, 35.0),
                     NSSize::new(110.0, 30.0),
                 ),
                 sel!(settingsClear:),
@@ -470,6 +488,10 @@ fn show_settings_modal() -> Result<()> {
         ] {
             let button: id = msg_send![class!(NSButton), buttonWithTitle: ns_string(title) target: controller action: action];
             let _: () = msg_send![button, setFrame: frame];
+            if title == "Save" {
+                let _: () = msg_send![button, setKeyEquivalent: ns_string("\r")];
+                let _: () = msg_send![button, setKeyEquivalentModifierMask: 0u64];
+            }
             let _: () = msg_send![content, addSubview: button];
         }
         SETTINGS_WINDOW.store(window as usize, Ordering::Relaxed);
@@ -517,7 +539,7 @@ fn load_token() -> Result<Option<String>> {
     match entry.get_password() {
         Ok(token) if token.trim().is_empty() => Ok(None),
         Ok(token) => Ok(Some(token)),
-        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(keyring::Error::NoEntry) => load_token_from_defaults(),
         Err(err) => Err(err).context("Keychain lookup failed"),
     }
 }
@@ -525,14 +547,46 @@ fn load_token() -> Result<Option<String>> {
 fn save_token(token: &str) -> Result<()> {
     token_entry()?
         .set_password(token)
-        .context("Failed to save token to the macOS keychain")
+        .context("Failed to save token to the macOS keychain")?;
+    unsafe {
+        let defaults: id = msg_send![class!(NSUserDefaults), standardUserDefaults];
+        let _: () = msg_send![
+            defaults,
+            setObject: ns_string(token)
+            forKey: ns_string(TOKEN_DEFAULTS_KEY)
+        ];
+    }
+    Ok(())
 }
 
 fn clear_token() -> Result<()> {
     let entry = token_entry()?;
     match entry.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Ok(()) | Err(keyring::Error::NoEntry) => {
+            unsafe {
+                let defaults: id = msg_send![class!(NSUserDefaults), standardUserDefaults];
+                let _: () = msg_send![defaults, removeObjectForKey: ns_string(TOKEN_DEFAULTS_KEY)];
+            }
+            Ok(())
+        }
         Err(err) => Err(err).context("Failed to clear saved token"),
+    }
+}
+
+fn load_token_from_defaults() -> Result<Option<String>> {
+    unsafe {
+        let defaults: id = msg_send![class!(NSUserDefaults), standardUserDefaults];
+        let value: id = msg_send![defaults, objectForKey: ns_string(TOKEN_DEFAULTS_KEY)];
+        if value == nil {
+            Ok(None)
+        } else {
+            let token = ns_string_to_rust(value);
+            if token.trim().is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(token))
+            }
+        }
     }
 }
 
@@ -623,9 +677,7 @@ extern "C" fn noop(_: &Object, _: Sel, _: id) {}
 extern "C" fn settings_save(_: &Object, _: Sel, _: id) {
     unsafe {
         let field = SETTINGS_FIELD.load(Ordering::Relaxed) as id;
-        let token = ns_string_to_rust(msg_send![field, stringValue])
-            .trim()
-            .to_owned();
+        let token = normalize_token(&ns_string_to_rust(msg_send![field, stringValue]));
         let result = if token.is_empty() {
             clear_token()
         } else {
@@ -648,6 +700,18 @@ extern "C" fn settings_save(_: &Object, _: Sel, _: id) {
         }
 
     }
+}
+
+fn normalize_token(value: &str) -> String {
+    let value = value.trim();
+    let value = value.strip_prefix('#').unwrap_or(value).trim();
+    let value = value
+        .strip_prefix("VERCEL_TOKEN=")
+        .unwrap_or(value)
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'');
+    value.split_whitespace().collect()
 }
 
 extern "C" fn settings_cancel(_: &Object, _: Sel, _: id) {
