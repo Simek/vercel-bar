@@ -460,13 +460,51 @@ unsafe fn make_menu_item(title: &str) -> id {
     )
 }
 
+unsafe fn add_settings_symbol(content: id, symbol: &str, description: &str, y: f64) {
+    let image: id = msg_send![
+        class!(NSImage),
+        imageWithSystemSymbolName: ns_string(symbol)
+        accessibilityDescription: ns_string(description)
+    ];
+    if image == nil {
+        return;
+    }
+    let image_view: id = msg_send![class!(NSImageView), alloc];
+    let image_view: id = msg_send![
+        image_view,
+        initWithFrame: NSRect::new(
+            cocoa::foundation::NSPoint::new(24.0, y + 1.0),
+            NSSize::new(18.0, 18.0)
+        )
+    ];
+    let _: () = msg_send![image_view, setImage: image];
+    let _: () = msg_send![image_view, setImageScaling: 3i64];
+    let _: () = msg_send![image_view, setImageAlignment: 0i64];
+    let tint: id = msg_send![class!(NSColor), secondaryLabelColor];
+    let _: () = msg_send![image_view, setContentTintColor: tint];
+    let _: () = msg_send![content, addSubview: image_view];
+}
+
+unsafe fn settings_heading_font() -> id {
+    let rounded: id = msg_send![
+        class!(NSFont),
+        fontWithName: ns_string("SF Pro Rounded Semibold")
+        size: 16.0f64
+    ];
+    if rounded != nil {
+        rounded
+    } else {
+        msg_send![class!(NSFont), systemFontOfSize: 16.0f64 weight: 0.4f64]
+    }
+}
+
 fn show_settings_modal(controller: id) -> Result<()> {
     unsafe {
         let app = NSApp();
         let _: () = msg_send![app, activateIgnoringOtherApps: YES];
         let window: id = msg_send![class!(NSWindow), alloc];
         let window: id = msg_send![window, initWithContentRect: NSRect::new(
-            cocoa::foundation::NSPoint::new(0.0, 0.0), NSSize::new(460.0, 290.0)
+            cocoa::foundation::NSPoint::new(0.0, 0.0), NSSize::new(500.0, 350.0)
         ) styleMask: (1u64 | 2u64) backing: 2u64 defer: NO];
         let _: () = msg_send![window, setTitle: ns_string("Settings")];
         let _: () = msg_send![window, setReleasedWhenClosed: NO];
@@ -476,19 +514,20 @@ fn show_settings_modal(controller: id) -> Result<()> {
         let _: () = msg_send![window, center];
         let content: id = msg_send![window, contentView];
 
+        add_settings_symbol(content, "person.crop.circle", "Vercel account", 294.0);
         let account_label: id =
             msg_send![class!(NSTextField), labelWithString: ns_string("Vercel Account")];
         let _: () = msg_send![account_label, setFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(20.0, 246.0), NSSize::new(280.0, 22.0)
+            cocoa::foundation::NSPoint::new(56.0, 292.0), NSSize::new(300.0, 22.0)
         )];
-        let heading_font: id = msg_send![class!(NSFont), systemFontOfSize: 13.0f64 weight: 0.4f64];
+        let heading_font = settings_heading_font();
         let _: () = msg_send![account_label, setFont: heading_font];
         let _: () = msg_send![content, addSubview: account_label];
         let label: id = msg_send![class!(NSTextField), labelWithString: ns_string(
             "Vercel token (used to load teams and projects):"
         )];
         let _: () = msg_send![label, setFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(20.0, 220.0), NSSize::new(420.0, 20.0)
+            cocoa::foundation::NSPoint::new(56.0, 266.0), NSSize::new(420.0, 20.0)
         )];
         let secondary_color: id = msg_send![class!(NSColor), secondaryLabelColor];
         let _: () = msg_send![label, setTextColor: secondary_color];
@@ -496,7 +535,7 @@ fn show_settings_modal(controller: id) -> Result<()> {
 
         let text_field: id = msg_send![class!(NSSecureTextField), alloc];
         let text_field: id = msg_send![text_field, initWithFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(20.0, 176.0), NSSize::new(420.0, 40.0)
+            cocoa::foundation::NSPoint::new(56.0, 222.0), NSSize::new(420.0, 32.0)
         )];
         let _: () = msg_send![text_field, setEditable: YES];
         let _: () = msg_send![text_field, setSelectable: YES];
@@ -506,39 +545,42 @@ fn show_settings_modal(controller: id) -> Result<()> {
         }
         let _: () = msg_send![content, addSubview: text_field];
 
+        let clear: id = msg_send![class!(NSButton), buttonWithTitle: ns_string("Clear Token") target: controller action: sel!(settingsClear:)];
+        let _: () = msg_send![clear, setFrame: NSRect::new(
+            cocoa::foundation::NSPoint::new(56.0, 180.0), NSSize::new(112.0, 28.0)
+        )];
+        let _: () = msg_send![content, addSubview: clear];
+
+        add_settings_symbol(content, "square.grid.2x2", "Project display", 132.0);
         let display_label: id =
             msg_send![class!(NSTextField), labelWithString: ns_string("Project Display")];
         let _: () = msg_send![display_label, setFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(20.0, 128.0), NSSize::new(420.0, 22.0)
+            cocoa::foundation::NSPoint::new(56.0, 130.0), NSSize::new(420.0, 22.0)
         )];
         let _: () = msg_send![display_label, setFont: heading_font];
         let _: () = msg_send![content, addSubview: display_label];
         let sort_label: id =
             msg_send![class!(NSTextField), labelWithString: ns_string("Projects sort order")];
         let _: () = msg_send![sort_label, setFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(20.0, 99.0), NSSize::new(140.0, 22.0)
+            cocoa::foundation::NSPoint::new(56.0, 99.0), NSSize::new(160.0, 22.0)
         )];
         let _: () = msg_send![content, addSubview: sort_label];
         let sort_popup: id = msg_send![class!(NSPopUpButton), alloc];
         let sort_popup: id = msg_send![sort_popup, initWithFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(235.0, 95.0), NSSize::new(205.0, 28.0)
+            cocoa::foundation::NSPoint::new(270.0, 100.0), NSSize::new(206.0, 28.0)
         ) pullsDown: NO];
         let _: () = msg_send![sort_popup, addItemWithTitle: ns_string("Last deployment date")];
         let _: () = msg_send![sort_popup, addItemWithTitle: ns_string("Alphabetically")];
         let _: () = msg_send![sort_popup, selectItemAtIndex: project_sort_order()];
         let _: () = msg_send![content, addSubview: sort_popup];
 
-        let clear: id = msg_send![class!(NSButton), buttonWithTitle: ns_string("Clear Token") target: controller action: sel!(settingsClear:)];
-        let _: () = msg_send![clear, setFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(330.0, 246.0), NSSize::new(110.0, 28.0)
-        )];
         let cancel: id = msg_send![class!(NSButton), buttonWithTitle: ns_string("Cancel") target: controller action: sel!(settingsCancel:)];
         let _: () = msg_send![cancel, setFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(295.0, 20.0), NSSize::new(65.0, 32.0)
+            cocoa::foundation::NSPoint::new(330.0, 20.0), NSSize::new(70.0, 32.0)
         )];
         let save: id = msg_send![class!(NSButton), buttonWithTitle: ns_string("Save") target: controller action: sel!(settingsSave:)];
         let _: () = msg_send![save, setFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(370.0, 20.0), NSSize::new(70.0, 32.0)
+            cocoa::foundation::NSPoint::new(414.0, 20.0), NSSize::new(70.0, 32.0)
         )];
         let _: () = msg_send![save, setKeyEquivalent: ns_string("\r")];
         let _: () = msg_send![save, setKeyEquivalentModifierMask: 0u64];
@@ -547,7 +589,6 @@ fn show_settings_modal(controller: id) -> Result<()> {
         let _: () = msg_send![save, setBezelStyle: 1i64];
         let _: () = msg_send![content, addSubview: cancel];
         let _: () = msg_send![content, addSubview: save];
-        let _: () = msg_send![content, addSubview: clear];
         SETTINGS_WINDOW.store(window as usize, Ordering::Relaxed);
         SETTINGS_FIELD.store(text_field as usize, Ordering::Relaxed);
         SETTINGS_SORT.store(sort_popup as usize, Ordering::Relaxed);
