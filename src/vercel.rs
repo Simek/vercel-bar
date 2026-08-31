@@ -189,8 +189,13 @@ impl ProjectSnapshot {
             .as_ref()
             .map(Deployment::status)
             .unwrap_or(DeploymentStatus::Missing);
-        let latest_status_label = latest.as_ref().map(deployment_label).unwrap_or_else(|| "Deployment: none".to_owned());
-        let latest_deployment_url = latest.as_ref().and_then(|deployment| deployment.inspector_url.clone())
+        let latest_status_label = latest
+            .as_ref()
+            .map(deployment_label)
+            .unwrap_or_else(|| "Deployment: none".to_owned());
+        let latest_deployment_url = latest
+            .as_ref()
+            .and_then(|deployment| deployment.inspector_url.clone())
             .or_else(|| Some(format!("{dashboard_url}/deployments")));
         let production_url = latest.as_ref().and_then(Deployment::production_url);
 
@@ -204,12 +209,13 @@ impl ProjectSnapshot {
             latest_status_label,
             latest_deployment_at: latest.as_ref().and_then(|deployment| deployment.created_at),
         }
-
     }
 }
 
 fn deployment_label(deployment: &Deployment) -> String {
-    let date = deployment.created_at.and_then(|millis| chrono::DateTime::from_timestamp_millis(millis))
+    let date = deployment
+        .created_at
+        .and_then(chrono::DateTime::from_timestamp_millis)
         .map(|time| time.format("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_else(|| "unknown date".to_owned());
     format!("Deployment: {date}")

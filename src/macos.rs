@@ -271,9 +271,9 @@ unsafe fn add_team_menu(menu: id, controller: id, team: &TeamSnapshot) {
     let _: () = msg_send![menu, addItem: item];
     let mut projects = team.projects.clone();
     if project_sort_order() == SORT_ALPHABETICAL {
-        projects.sort_by(|left, right| left.name.to_ascii_lowercase().cmp(&right.name.to_ascii_lowercase()));
+        projects.sort_by_key(|project| project.name.to_ascii_lowercase());
     } else {
-        projects.sort_by(|left, right| right.latest_deployment_at().cmp(&left.latest_deployment_at()));
+        projects.sort_by_key(|project| std::cmp::Reverse(project.latest_deployment_at()));
     }
     for project in &projects {
         add_project_menu(menu, controller, project);
@@ -476,7 +476,8 @@ fn show_settings_modal(controller: id) -> Result<()> {
         let _: () = msg_send![window, center];
         let content: id = msg_send![window, contentView];
 
-        let account_label: id = msg_send![class!(NSTextField), labelWithString: ns_string("Vercel Account")];
+        let account_label: id =
+            msg_send![class!(NSTextField), labelWithString: ns_string("Vercel Account")];
         let _: () = msg_send![account_label, setFrame: NSRect::new(
             cocoa::foundation::NSPoint::new(20.0, 246.0), NSSize::new(280.0, 22.0)
         )];
@@ -505,13 +506,15 @@ fn show_settings_modal(controller: id) -> Result<()> {
         }
         let _: () = msg_send![content, addSubview: text_field];
 
-        let display_label: id = msg_send![class!(NSTextField), labelWithString: ns_string("Project Display")];
+        let display_label: id =
+            msg_send![class!(NSTextField), labelWithString: ns_string("Project Display")];
         let _: () = msg_send![display_label, setFrame: NSRect::new(
             cocoa::foundation::NSPoint::new(20.0, 128.0), NSSize::new(420.0, 22.0)
         )];
         let _: () = msg_send![display_label, setFont: heading_font];
         let _: () = msg_send![content, addSubview: display_label];
-        let sort_label: id = msg_send![class!(NSTextField), labelWithString: ns_string("Projects sort order")];
+        let sort_label: id =
+            msg_send![class!(NSTextField), labelWithString: ns_string("Projects sort order")];
         let _: () = msg_send![sort_label, setFrame: NSRect::new(
             cocoa::foundation::NSPoint::new(20.0, 99.0), NSSize::new(140.0, 22.0)
         )];
@@ -581,10 +584,10 @@ unsafe fn show_error_alert(title: &str, message: &str) {
 }
 
 fn load_token() -> Result<Option<String>> {
-    if let Ok(token) = std::env::var("VERCEL_TOKEN") {
-        if !token.trim().is_empty() {
-            return Ok(Some(token.trim().to_owned()));
-        }
+    if let Ok(token) = std::env::var("VERCEL_TOKEN")
+        && !token.trim().is_empty()
+    {
+        return Ok(Some(token.trim().to_owned()));
     }
     let entry = token_entry()?;
     match entry.get_password() {
@@ -739,9 +742,9 @@ extern "C" fn settings_save(_: &Object, _: Sel, _: id) {
         };
         match result {
             Ok(()) => {
-                    let sort_popup = SETTINGS_SORT.load(Ordering::Relaxed) as id;
-                    let sort: i64 = msg_send![sort_popup, indexOfSelectedItem];
-                    set_project_sort_order(sort);
+                let sort_popup = SETTINGS_SORT.load(Ordering::Relaxed) as id;
+                let sort: i64 = msg_send![sort_popup, indexOfSelectedItem];
+                set_project_sort_order(sort);
                 clear_snapshot_cache();
                 SETTINGS_RESPONSE.store(SETTINGS_SAVE as usize, Ordering::Relaxed);
                 let _: () = msg_send![NSApp(), stopModal];
@@ -749,7 +752,6 @@ extern "C" fn settings_save(_: &Object, _: Sel, _: id) {
 
             Err(err) => show_error_alert("Failed to update Vercel token", &err.to_string()),
         }
-
     }
 }
 
@@ -783,7 +785,11 @@ fn project_sort_order() -> i64 {
     unsafe {
         let defaults: id = msg_send![class!(NSUserDefaults), standardUserDefaults];
         let value: i64 = msg_send![defaults, integerForKey: ns_string(PROJECT_SORT_KEY)];
-        if value == SORT_ALPHABETICAL { SORT_ALPHABETICAL } else { SORT_LAST_DEPLOYMENT }
+        if value == SORT_ALPHABETICAL {
+            SORT_ALPHABETICAL
+        } else {
+            SORT_LAST_DEPLOYMENT
+        }
     }
 }
 
