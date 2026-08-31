@@ -38,12 +38,7 @@ pub enum DeploymentStatus {
 
 impl DeploymentStatus {
     pub fn indicator(&self) -> &'static str {
-        match self {
-            Self::Healthy => "🟢",
-            Self::Failed => "🔴",
-            Self::Pending => "🟡",
-            Self::Missing => "⚪️",
-        }
+        "●"
     }
 }
 

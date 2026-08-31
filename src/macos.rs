@@ -6,7 +6,7 @@ use cocoa::appkit::{
     NSVariableStatusItemLength,
 };
 use cocoa::base::{NO, YES, id, nil};
-use cocoa::foundation::{NSAutoreleasePool, NSRect, NSSize, NSString};
+use cocoa::foundation::{NSAutoreleasePool, NSRange, NSRect, NSSize, NSString};
 use keyring::Entry;
 use objc::declare::ClassDecl;
 use objc::runtime::{Class, Object, Sel};
@@ -242,6 +242,10 @@ unsafe fn add_team_menu(menu: id, controller: id, team: &TeamSnapshot) {
 unsafe fn add_project_menu(menu: id, controller: id, project: &ProjectSnapshot) {
     let title = format!("{} {}", project.latest_status.indicator(), project.name);
     let project_item = make_menu_item(&title);
+    let _: () = msg_send![
+        project_item,
+        setAttributedTitle: colored_title(&title, &project.latest_status)
+    ];
     let project_menu = NSMenu::new(nil);
     let _: () = msg_send![project_menu, setAutoenablesItems: NO];
 
@@ -250,6 +254,30 @@ unsafe fn add_project_menu(menu: id, controller: id, project: &ProjectSnapshot) 
 
     if let Some(url) = &project.latest_deployment_url {
         add_url_item(project_menu, "Open latest deployment", url, controller);
+    }
+
+    unsafe fn colored_title(title: &str, status: &crate::vercel::DeploymentStatus) -> id {
+        let color: id = match status {
+            crate::vercel::DeploymentStatus::Healthy => msg_send![class!(NSColor), systemGreenColor],
+            crate::vercel::DeploymentStatus::Failed => msg_send![class!(NSColor), systemRedColor],
+            crate::vercel::DeploymentStatus::Pending => msg_send![class!(NSColor), systemOrangeColor],
+            crate::vercel::DeploymentStatus::Missing => msg_send![class!(NSColor), secondaryLabelColor],
+        };
+        let attributed: id = msg_send![
+            class!(NSMutableAttributedString),
+            alloc
+        ];
+        let attributed: id = msg_send![
+            attributed,
+            initWithString: ns_string(title)
+        ];
+        let _: () = msg_send![
+            attributed,
+            addAttribute: ns_string("NSColor")
+            value: color
+            range: NSRange::new(0, 1)
+        ];
+        attributed
     }
 
     add_url_item(
