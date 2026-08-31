@@ -266,7 +266,21 @@ unsafe fn populate_error_menu(menu: id, controller: id, message: &str) {
 
 unsafe fn add_team_menu(menu: id, controller: id, team: &TeamSnapshot) {
     add_separator(menu);
-    let title = format!("{} ({})", team.name, team.projects.len());
+    let visible_projects = team
+        .projects
+        .iter()
+        .filter(|project| {
+            is_visible(&visibility_key(
+                "project",
+                &format!("{}::{}", team.name, project.name),
+            ))
+        })
+        .count();
+    let title = if visible_projects == team.projects.len() {
+        team.name.clone()
+    } else {
+        format!("{} ({visible_projects}/{})", team.name, team.projects.len())
+    };
     let item = make_menu_item(&title);
     let image: id = msg_send![
         class!(NSImage),
