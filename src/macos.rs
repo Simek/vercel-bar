@@ -47,6 +47,7 @@ static SETTINGS_CONTENT: AtomicUsize = AtomicUsize::new(0);
 static SETTINGS_TREE: AtomicUsize = AtomicUsize::new(0);
 static SETTINGS_SNAPSHOT: OnceCell<Mutex<Option<AppSnapshot>>> = OnceCell::new();
 static SETTINGS_PENDING_VISIBILITY: OnceCell<Mutex<Vec<(String, bool)>>> = OnceCell::new();
+static SETTINGS_ORIGINAL_TOKEN: OnceCell<Mutex<Option<String>>> = OnceCell::new();
 
 struct AppLifetime {
     _controller: id,
@@ -306,7 +307,7 @@ unsafe fn add_project_menu(menu: id, controller: id, project: &ProjectSnapshot) 
         match project.latest_status {
             crate::vercel::DeploymentStatus::Healthy => "checkmark.circle.fill",
             crate::vercel::DeploymentStatus::Failed => "xmark.circle.fill",
-            crate::vercel::DeploymentStatus::Pending => "circle.dotted",
+            crate::vercel::DeploymentStatus::Pending => "circle.circle.fill",
             crate::vercel::DeploymentStatus::Missing => "circle",
         },
         status_color,
@@ -409,6 +410,16 @@ unsafe fn add_separator(menu: id) {
 
 unsafe fn add_static_item(menu: id, title: &str) {
     let item = make_menu_item(title);
+    if title == "Add a Vercel token in Settings." {
+        let image: id = msg_send![
+            class!(NSImage),
+            imageWithSystemSymbolName: ns_string("info.circle")
+            accessibilityDescription: ns_string("Information")
+        ];
+        if image != nil {
+            let _: () = msg_send![item, setImage: image];
+        }
+    }
     let _: () = msg_send![item, setEnabled: NO];
     let _: () = msg_send![menu, addItem: item];
 }
@@ -653,6 +664,14 @@ unsafe fn add_visibility_tree(content: id, snapshot: Option<&AppSnapshot>, sort_
     let _: () = msg_send![scroll, setDrawsBackground: NO];
     let _: () = msg_send![scroll, setDocumentView: document];
     let _: () = msg_send![content, addSubview: scroll];
+    let clip_view: id = msg_send![scroll, contentView];
+    let clip_bounds: NSRect = msg_send![clip_view, bounds];
+    let top_y = (document_height - clip_bounds.size.height).max(0.0);
+    let _: () = msg_send![
+        clip_view,
+        scrollToPoint: cocoa::foundation::NSPoint::new(0.0, top_y)
+    ];
+    let _: () = msg_send![scroll, reflectScrolledClipView: clip_view];
     pending_visibility().lock().unwrap().clear();
     scroll
 }
@@ -661,10 +680,20 @@ fn show_settings_modal(controller: id) -> Result<()> {
     unsafe {
         let app = NSApp();
         let _: () = msg_send![app, activateIgnoringOtherApps: YES];
+        let initial_token = load_token()?;
+        SETTINGS_ORIGINAL_TOKEN
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .unwrap()
+            .clone_from(&initial_token);
         let snapshot = match cached_snapshot() {
             Some(snapshot) => Some(snapshot),
-            None => match load_token()? {
-                Some(token) => Some(VercelClient::new(token)?.fetch_snapshot()?),
+            None => match initial_token.as_deref() {
+                Some(token) => {
+                    let snapshot = VercelClient::new(token)?.fetch_snapshot()?;
+                    cache_snapshot(snapshot.clone());
+                    Some(snapshot)
+                }
                 None => None,
             },
         };
@@ -676,6 +705,7 @@ fn show_settings_modal(controller: id) -> Result<()> {
         let _: () = msg_send![window, setTitlebarAppearsTransparent: YES];
         let _: () = msg_send![window, setTitleVisibility: 0i64];
         let _: () = msg_send![window, setReleasedWhenClosed: NO];
+        let _: () = msg_send![window, setInitialFirstResponder: nil];
         let close_button: id = msg_send![window, standardWindowButton: 2i64];
         let _: () = msg_send![close_button, setTarget: controller];
         let _: () = msg_send![close_button, setAction: sel!(settingsCancel:)];
@@ -725,12 +755,11 @@ fn show_settings_modal(controller: id) -> Result<()> {
 
         let text_field: id = msg_send![class!(NSSecureTextField), alloc];
         let text_field: id = msg_send![text_field, initWithFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(56.0, 430.0), NSSize::new(420.0, 32.0)
+            cocoa::foundation::NSPoint::new(56.0, 428.0), NSSize::new(420.0, 36.0)
         )];
         let _: () = msg_send![text_field, setEditable: YES];
         let _: () = msg_send![text_field, setSelectable: YES];
-        let _: () = msg_send![text_field, setPlaceholderString: ns_string("Paste a Vercel token")];
-        if let Some(token) = load_token()? {
+        if let Some(token) = initial_token {
             let _: () = msg_send![text_field, setStringValue: ns_string(&token)];
         }
         let _: () = msg_send![content, addSubview: text_field];
@@ -788,7 +817,7 @@ fn show_settings_modal(controller: id) -> Result<()> {
         SETTINGS_SORT.store(sort_popup as usize, Ordering::Relaxed);
         SETTINGS_RESPONSE.store(0, Ordering::Relaxed);
         let _: () = msg_send![window, makeKeyAndOrderFront: nil];
-        let _: () = msg_send![window, makeFirstResponder: text_field];
+        let _: () = msg_send![window, makeFirstResponder: nil];
         let _: () = msg_send![app, runModalForWindow: window];
         let response = SETTINGS_RESPONSE.load(Ordering::Relaxed) as i64;
         let _: () = msg_send![window, orderOut: nil];
@@ -1004,8 +1033,19 @@ extern "C" fn settings_save(_: &Object, _: Sel, _: id) {
     unsafe {
         let field = SETTINGS_FIELD.load(Ordering::Relaxed) as id;
         let token = normalize_token(&ns_string_to_rust(msg_send![field, stringValue]));
-        let result = if token.is_empty() {
+        let original_token = SETTINGS_ORIGINAL_TOKEN
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .unwrap()
+            .clone();
+        let new_token = (!token.is_empty()).then_some(token.as_str());
+        let token_changed = original_token.as_deref() != new_token;
+        let result = if token.is_empty() && token_changed {
             clear_token()
+        } else if token.is_empty() {
+            Ok(())
+        } else if original_token.as_deref() == Some(token.as_str()) {
+            Ok(())
         } else {
             VercelClient::new(&token)
                 .and_then(|client| client.validate_token())
@@ -1028,7 +1068,9 @@ extern "C" fn settings_save(_: &Object, _: Sel, _: id) {
                     ];
                 }
                 let _: () = msg_send![defaults, synchronize];
-                clear_snapshot_cache();
+                if token_changed {
+                    clear_snapshot_cache();
+                }
                 SETTINGS_RESPONSE.store(SETTINGS_SAVE as usize, Ordering::Relaxed);
                 let _: () = msg_send![NSApp(), stopModal];
             }
