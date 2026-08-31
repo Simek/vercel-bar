@@ -14,18 +14,32 @@ use objc::{class, msg_send, sel, sel_impl};
 use once_cell::sync::OnceCell;
 use std::ffi::CStr;
 use std::os::raw::c_char;
-use std::{process::Command, sync::{Mutex, atomic::{AtomicUsize, Ordering}}, time::{Duration, Instant}};
+use std::{
+    process::Command,
+    sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::{Duration, Instant},
+};
 
 use crate::vercel::{AppSnapshot, ProjectSnapshot, TeamSnapshot, VercelClient};
 
 const KEYRING_SERVICE: &str = "dev-tree";
 const KEYRING_ACCOUNT: &str = "vercel-token";
-const NS_ALERT_FIRST_BUTTON_RETURN: i64 = 1000;
-const NS_ALERT_THIRD_BUTTON_RETURN: i64 = 1002;
+const SETTINGS_SAVE: i64 = 1;
+const SETTINGS_CLEAR: i64 = 2;
+const PROJECT_SORT_KEY: &str = "projectSortOrder";
+const SORT_LAST_DEPLOYMENT: i64 = 0;
+const SORT_ALPHABETICAL: i64 = 1;
 const CACHE_TTL: Duration = Duration::from_secs(300);
 static SNAPSHOT_CACHE: OnceCell<Mutex<Option<(Instant, AppSnapshot)>>> = OnceCell::new();
 static STATUS_ITEM: AtomicUsize = AtomicUsize::new(0);
 static APP_MENU: AtomicUsize = AtomicUsize::new(0);
+static SETTINGS_WINDOW: AtomicUsize = AtomicUsize::new(0);
+static SETTINGS_FIELD: AtomicUsize = AtomicUsize::new(0);
+static SETTINGS_SORT: AtomicUsize = AtomicUsize::new(0);
+static SETTINGS_RESPONSE: AtomicUsize = AtomicUsize::new(0);
 
 struct AppLifetime {
     _controller: id,
@@ -163,10 +177,10 @@ unsafe fn rebuild_menu(menu: id, controller: id) {
                         cache_snapshot(snapshot.clone());
                         populate_snapshot_menu(menu, controller, snapshot);
                     }
-                Err(err) => populate_error_menu(
-                    menu,
-                    controller,
-                    &format!("Failed to load Vercel data: {err}"),
+                    Err(err) => populate_error_menu(
+                        menu,
+                        controller,
+                        &format!("Failed to load Vercel data: {err}"),
                     ),
                 }
             }
@@ -185,10 +199,14 @@ unsafe fn rebuild_menu(menu: id, controller: id) {
 }
 
 extern "C" fn auto_refresh(this: &Object, _: Sel, _: id) {
-    if cached_snapshot().is_some() { return; }
+    if cached_snapshot().is_some() {
+        return;
+    }
     unsafe {
         let menu = APP_MENU.load(Ordering::Relaxed) as id;
-        if menu != nil { rebuild_menu(menu, this as *const _ as id); }
+        if menu != nil {
+            rebuild_menu(menu, this as *const _ as id);
+        }
     }
 }
 
@@ -218,10 +236,7 @@ unsafe fn populate_snapshot_menu(menu: id, controller: id, snapshot: AppSnapshot
 
 unsafe fn populate_missing_token_menu(menu: id, controller: id) {
     clear_menu(menu);
-    add_static_item(
-        menu,
-        "Add a Vercel token in Settings.",
-    );
+    add_static_item(menu, "Add a Vercel token in Settings.");
     add_footer_items(menu, controller);
 }
 
@@ -234,7 +249,13 @@ unsafe fn populate_error_menu(menu: id, controller: id, message: &str) {
 unsafe fn add_team_menu(menu: id, controller: id, team: &TeamSnapshot) {
     add_separator(menu);
     add_static_item(menu, &format!("{} ({})", team.name, team.projects.len()));
-    for project in &team.projects {
+    let mut projects = team.projects.clone();
+    if project_sort_order() == SORT_ALPHABETICAL {
+        projects.sort_by(|left, right| left.name.to_ascii_lowercase().cmp(&right.name.to_ascii_lowercase()));
+    } else {
+        projects.sort_by(|left, right| right.latest_deployment_at().cmp(&left.latest_deployment_at()));
+    }
+    for project in &projects {
         add_project_menu(menu, controller, project);
     }
 }
@@ -258,15 +279,18 @@ unsafe fn add_project_menu(menu: id, controller: id, project: &ProjectSnapshot) 
 
     unsafe fn colored_title(title: &str, status: &crate::vercel::DeploymentStatus) -> id {
         let color: id = match status {
-            crate::vercel::DeploymentStatus::Healthy => msg_send![class!(NSColor), systemGreenColor],
+            crate::vercel::DeploymentStatus::Healthy => {
+                msg_send![class!(NSColor), systemGreenColor]
+            }
             crate::vercel::DeploymentStatus::Failed => msg_send![class!(NSColor), systemRedColor],
-            crate::vercel::DeploymentStatus::Pending => msg_send![class!(NSColor), systemOrangeColor],
-            crate::vercel::DeploymentStatus::Missing => msg_send![class!(NSColor), secondaryLabelColor],
+            crate::vercel::DeploymentStatus::Pending => {
+                msg_send![class!(NSColor), systemOrangeColor]
+            }
+            crate::vercel::DeploymentStatus::Missing => {
+                msg_send![class!(NSColor), secondaryLabelColor]
+            }
         };
-        let attributed: id = msg_send![
-            class!(NSMutableAttributedString),
-            alloc
-        ];
+        let attributed: id = msg_send![class!(NSMutableAttributedString), alloc];
         let attributed: id = msg_send![
             attributed,
             initWithString: ns_string(title)
@@ -314,7 +338,10 @@ fn clear_snapshot_cache() {
 fn cached_snapshot() -> Option<AppSnapshot> {
     let cache = SNAPSHOT_CACHE.get_or_init(|| Mutex::new(None));
     let guard = cache.lock().unwrap();
-    guard.as_ref().filter(|(time, _)| time.elapsed() < CACHE_TTL).map(|(_, snapshot)| snapshot.clone())
+    guard
+        .as_ref()
+        .filter(|(time, _)| time.elapsed() < CACHE_TTL)
+        .map(|(_, snapshot)| snapshot.clone())
 }
 
 unsafe fn add_footer_items(menu: id, controller: id) {
@@ -379,55 +406,92 @@ fn show_settings_modal() -> Result<()> {
     unsafe {
         let app = NSApp();
         let _: () = msg_send![app, activateIgnoringOtherApps: YES];
-
-        let alert: id = msg_send![class!(NSAlert), new];
-        let _: () = msg_send![alert, setMessageText: ns_string("Vercel token")];
-        let _: () = msg_send![alert, setInformativeText: ns_string(
-            "Enter a Vercel token to load teams and projects in the Vercel Bar menu bar app.",
+        let window: id = msg_send![class!(NSWindow), alloc];
+        let window: id = msg_send![window, initWithContentRect: NSRect::new(
+            cocoa::foundation::NSPoint::new(0.0, 0.0), NSSize::new(460.0, 230.0)
+        ) styleMask: 1u64 backing: 2u64 defer: NO];
+        let _: () = msg_send![window, setTitle: ns_string("Settings")];
+        let _: () = msg_send![window, center];
+        let content: id = msg_send![window, contentView];
+        let label: id = msg_send![class!(NSTextField), labelWithString: ns_string(
+            "Vercel token (used to load teams and projects):"
         )];
-        let _: id = msg_send![alert, addButtonWithTitle: ns_string("Save")];
-        let _: id = msg_send![alert, addButtonWithTitle: ns_string("Cancel")];
-        let _: id = msg_send![alert, addButtonWithTitle: ns_string("Clear Token")];
-
+        let _: () = msg_send![label, setFrame: NSRect::new(
+            cocoa::foundation::NSPoint::new(24.0, 172.0), NSSize::new(412.0, 24.0)
+        )];
+        let _: () = msg_send![content, addSubview: label];
         let text_field: id = msg_send![class!(NSSecureTextField), alloc];
         let text_field: id = msg_send![text_field, initWithFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(0.0, 0.0),
-            NSSize::new(360.0, 24.0),
+            cocoa::foundation::NSPoint::new(24.0, 134.0), NSSize::new(412.0, 28.0)
         )];
-        let _: () = msg_send![text_field, setEditable: YES];
-        let _: () = msg_send![text_field, setSelectable: YES];
         if let Some(token) = load_token()? {
             let _: () = msg_send![text_field, setStringValue: ns_string(&token)];
         }
-        let _: () = msg_send![alert, setAccessoryView: text_field];
-        let alert_window: id = msg_send![alert, window];
-        let _: () = msg_send![alert_window, makeKeyAndOrderFront: nil];
-        let _: () = msg_send![alert_window, setInitialFirstResponder: text_field];
-        let _: () = msg_send![alert_window, makeFirstResponder: text_field];
-
-        let response: i64 = msg_send![alert, runModal];
-        match response {
-            NS_ALERT_FIRST_BUTTON_RETURN => {
-                let token: id = msg_send![text_field, stringValue];
-                let token = ns_string_to_rust(token).trim().to_owned();
-                if token.is_empty() {
-                    clear_token()?;
-                    return Ok(());
-                }
-
-                VercelClient::new(&token)
-                    .and_then(|client| client.validate_token())
-                    .context("The provided Vercel token is invalid")?;
-                save_token(&token)?;
-                clear_snapshot_cache();
-                Ok(())
-            }
-            NS_ALERT_THIRD_BUTTON_RETURN => {
-                clear_token()?;
-                clear_snapshot_cache();
-                Ok(())
-            }
-            _ => Ok(()),
+        let _: () = msg_send![content, addSubview: text_field];
+        let sort_label: id = msg_send![class!(NSTextField), labelWithString: ns_string("Projects sort order:")];
+        let _: () = msg_send![sort_label, setFrame: NSRect::new(
+            cocoa::foundation::NSPoint::new(24.0, 96.0), NSSize::new(180.0, 24.0)
+        )];
+        let _: () = msg_send![content, addSubview: sort_label];
+        let sort_popup: id = msg_send![class!(NSPopUpButton), alloc];
+        let sort_popup: id = msg_send![sort_popup, initWithFrame: NSRect::new(
+            cocoa::foundation::NSPoint::new(200.0, 92.0), NSSize::new(235.0, 28.0)
+        ) pullsDown: NO];
+        let _: () = msg_send![sort_popup, addItemWithTitle: ns_string("Last deployment date")];
+        let _: () = msg_send![sort_popup, addItemWithTitle: ns_string("Alphabetically")];
+        let _: () = msg_send![sort_popup, selectItemAtIndex: project_sort_order()];
+        let _: () = msg_send![content, addSubview: sort_popup];
+        let controller = new_controller();
+        for (title, frame, action) in [
+            (
+                "Save",
+                NSRect::new(
+                    cocoa::foundation::NSPoint::new(250.0, 20.0),
+                    NSSize::new(90.0, 30.0),
+                ),
+                sel!(settingsSave:),
+            ),
+            (
+                "Cancel",
+                NSRect::new(
+                    cocoa::foundation::NSPoint::new(345.0, 20.0),
+                    NSSize::new(90.0, 30.0),
+                ),
+                sel!(settingsCancel:),
+            ),
+            (
+                "Clear Token",
+                NSRect::new(
+                    cocoa::foundation::NSPoint::new(24.0, 20.0),
+                    NSSize::new(110.0, 30.0),
+                ),
+                sel!(settingsClear:),
+            ),
+        ] {
+            let button: id = msg_send![class!(NSButton), buttonWithTitle: ns_string(title) target: controller action: action];
+            let _: () = msg_send![button, setFrame: frame];
+            let _: () = msg_send![content, addSubview: button];
+        }
+        SETTINGS_WINDOW.store(window as usize, Ordering::Relaxed);
+        SETTINGS_FIELD.store(text_field as usize, Ordering::Relaxed);
+        SETTINGS_SORT.store(sort_popup as usize, Ordering::Relaxed);
+        SETTINGS_RESPONSE.store(0, Ordering::Relaxed);
+        let _: () = msg_send![window, makeKeyAndOrderFront: nil];
+        let _: () = msg_send![window, makeFirstResponder: text_field];
+        let _: () = msg_send![app, runModalForWindow: window];
+        let response = SETTINGS_RESPONSE.load(Ordering::Relaxed) as i64;
+        let _: () = msg_send![window, orderOut: nil];
+        SETTINGS_WINDOW.store(0, Ordering::Relaxed);
+        SETTINGS_FIELD.store(0, Ordering::Relaxed);
+        SETTINGS_SORT.store(0, Ordering::Relaxed);
+        if response == SETTINGS_SAVE {
+            Ok(())
+        } else if response == SETTINGS_CLEAR {
+            clear_token()?;
+            clear_snapshot_cache();
+            Ok(())
+        } else {
+            Ok(())
         }
     }
 }
@@ -538,8 +602,80 @@ fn menu_controller_class() -> &'static Class {
         );
         decl.add_method(sel!(quitApp:), quit_app as extern "C" fn(&Object, Sel, id));
         decl.add_method(sel!(noop:), noop as extern "C" fn(&Object, Sel, id));
+        decl.add_method(
+            sel!(settingsSave:),
+            settings_save as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(settingsCancel:),
+            settings_cancel as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(settingsClear:),
+            settings_clear as extern "C" fn(&Object, Sel, id),
+        );
         decl.register()
     })
 }
 
 extern "C" fn noop(_: &Object, _: Sel, _: id) {}
+
+extern "C" fn settings_save(_: &Object, _: Sel, _: id) {
+    unsafe {
+        let field = SETTINGS_FIELD.load(Ordering::Relaxed) as id;
+        let token = ns_string_to_rust(msg_send![field, stringValue])
+            .trim()
+            .to_owned();
+        let result = if token.is_empty() {
+            clear_token()
+        } else {
+            VercelClient::new(&token)
+                .and_then(|client| client.validate_token())
+                .context("The provided Vercel token is invalid")
+                .and_then(|_| save_token(&token))
+        };
+        match result {
+            Ok(()) => {
+                    let sort_popup = SETTINGS_SORT.load(Ordering::Relaxed) as id;
+                    let sort: i64 = msg_send![sort_popup, indexOfSelectedItem];
+                    set_project_sort_order(sort);
+                clear_snapshot_cache();
+                SETTINGS_RESPONSE.store(SETTINGS_SAVE as usize, Ordering::Relaxed);
+                let _: () = msg_send![NSApp(), stopModal];
+            }
+
+            Err(err) => show_error_alert("Failed to update Vercel token", &err.to_string()),
+        }
+
+    }
+}
+
+extern "C" fn settings_cancel(_: &Object, _: Sel, _: id) {
+    SETTINGS_RESPONSE.store(0, Ordering::Relaxed);
+    unsafe {
+        let _: () = msg_send![NSApp(), stopModal];
+    }
+}
+
+extern "C" fn settings_clear(_: &Object, _: Sel, _: id) {
+    SETTINGS_RESPONSE.store(SETTINGS_CLEAR as usize, Ordering::Relaxed);
+    unsafe {
+        let _: () = msg_send![NSApp(), stopModal];
+    }
+}
+
+fn project_sort_order() -> i64 {
+    unsafe {
+        let defaults: id = msg_send![class!(NSUserDefaults), standardUserDefaults];
+        let value: i64 = msg_send![defaults, integerForKey: ns_string(PROJECT_SORT_KEY)];
+        if value == SORT_ALPHABETICAL { SORT_ALPHABETICAL } else { SORT_LAST_DEPLOYMENT }
+    }
+}
+
+fn set_project_sort_order(order: i64) {
+    unsafe {
+        let defaults: id = msg_send![class!(NSUserDefaults), standardUserDefaults];
+        let _: () = msg_send![defaults, setInteger: order forKey: ns_string(PROJECT_SORT_KEY)];
+        let _: () = msg_send![defaults, synchronize];
+    }
+}

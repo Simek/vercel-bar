@@ -183,6 +183,10 @@ impl VercelClient {
 }
 
 impl ProjectSnapshot {
+    pub fn latest_deployment_at(&self) -> Option<i64> {
+        self.latest_deployment_at
+    }
+
     fn from_api(project: Project, scope_slug: &str) -> Self {
         let dashboard_url = format!("https://vercel.com/{scope_slug}/{}", project.name);
         let logs_url = format!("{dashboard_url}/logs");
