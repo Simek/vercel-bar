@@ -26,6 +26,7 @@ pub struct ProjectSnapshot {
     pub production_url: Option<String>,
     pub latest_status: DeploymentStatus,
     pub latest_status_label: String,
+    latest_deployment_at: Option<i64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -145,9 +146,14 @@ impl VercelClient {
             .map(|project| ProjectSnapshot::from_api(project, scope_slug))
             .collect::<Vec<_>>();
         snapshots.sort_by(|left, right| {
-            left.name
-                .to_ascii_lowercase()
-                .cmp(&right.name.to_ascii_lowercase())
+            right
+                .latest_deployment_at
+                .cmp(&left.latest_deployment_at)
+                .then_with(|| {
+                    left.name
+                        .to_ascii_lowercase()
+                        .cmp(&right.name.to_ascii_lowercase())
+                })
         });
 
         Ok(snapshots)
@@ -198,6 +204,7 @@ impl ProjectSnapshot {
             production_url,
             latest_status,
             latest_status_label,
+            latest_deployment_at: latest.as_ref().and_then(|deployment| deployment.created_at),
         }
 
     }
