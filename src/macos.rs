@@ -66,7 +66,7 @@ pub fn run() {
         let status_item = status_bar.statusItemWithLength_(NSVariableStatusItemLength);
         STATUS_ITEM.store(status_item as usize, Ordering::Relaxed);
         let button: id = msg_send![status_item, button];
-        let _: () = msg_send![button, setTitle: ns_string("▲")];
+        set_status_icon(button, "triangle.fill");
 
         let menu = NSMenu::new(nil);
         let _: () = msg_send![menu, setAutoenablesItems: NO];
@@ -131,7 +131,7 @@ extern "C" fn refresh_menu(this: &Object, _: Sel, sender: id) {
         if let Some(cache) = SNAPSHOT_CACHE.get() {
             *cache.lock().unwrap() = None;
         }
-        set_status_title("♻");
+        set_status_icon_for_item("arrow.3.trianglepath");
         let _: id = msg_send![
             class!(NSTimer),
             scheduledTimerWithTimeInterval: 0.01f64
@@ -179,12 +179,12 @@ extern "C" fn quit_app(_: &Object, _: Sel, _: id) {
 
 unsafe fn rebuild_menu(menu: id, controller: id) {
     let _: () = msg_send![NSApp(), updateWindows];
+    set_status_icon_for_item("arrow.3.trianglepath");
     clear_menu(menu);
     add_static_item(menu, "Refreshing Vercel projects…");
 
     match load_token() {
         Ok(Some(token)) => {
-            set_status_title("♻");
             if let Some(snapshot) = cached_snapshot() {
                 populate_snapshot_menu(menu, controller, snapshot);
             } else {
@@ -208,9 +208,6 @@ unsafe fn rebuild_menu(menu: id, controller: id) {
             &format!("Failed to read saved token: {err}"),
         ),
     }
-    if load_token().ok().flatten().is_some() {
-        set_status_title("▲");
-    }
     let _: () = msg_send![menu, update];
 }
 
@@ -226,17 +223,31 @@ extern "C" fn auto_refresh(this: &Object, _: Sel, _: id) {
     }
 }
 
-unsafe fn set_status_title(title: &str) {
-    let item = STATUS_ITEM.load(Ordering::Relaxed) as id;
-    if item != nil {
-        let button: id = msg_send![item, button];
-        let _: () = msg_send![button, setTitle: ns_string(title)];
-        let _: () = msg_send![button, displayIfNeeded];
-        let _: () = msg_send![NSApp(), updateWindows];
+unsafe fn set_status_icon_for_item(symbol: &str) {
+    let status_item = STATUS_ITEM.load(Ordering::Relaxed) as id;
+    if status_item != nil {
+        let button: id = msg_send![status_item, button];
+        set_status_icon(button, symbol);
     }
 }
 
+unsafe fn set_status_icon(button: id, symbol: &str) {
+    let image: id = msg_send![
+        class!(NSImage),
+        imageWithSystemSymbolName: ns_string(symbol)
+        accessibilityDescription: ns_string("Vercel Bar")
+    ];
+    if image == nil {
+        return;
+    }
+    let _: () = msg_send![button, setImage: image];
+    let _: () = msg_send![button, setTitle: ns_string("")];
+    let _: () = msg_send![button, displayIfNeeded];
+    let _: () = msg_send![NSApp(), updateWindows];
+}
+
 unsafe fn populate_snapshot_menu(menu: id, controller: id, snapshot: AppSnapshot) {
+    set_status_icon_for_item("triangle.fill");
     clear_menu(menu);
 
     if snapshot.teams.is_empty() {
@@ -253,6 +264,7 @@ unsafe fn populate_snapshot_menu(menu: id, controller: id, snapshot: AppSnapshot
 }
 
 unsafe fn populate_missing_token_menu(menu: id, controller: id) {
+    set_status_icon_for_item("info.triangle.fill");
     clear_menu(menu);
     add_static_item(menu, "Add a Vercel token in Settings.");
     add_footer_items(menu, controller);

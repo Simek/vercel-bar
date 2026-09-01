@@ -40,4 +40,8 @@ cat > "$app_dir/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-echo "Built $app_dir"
+applications_app="/Applications/$app_dir"
+rm -rf "$applications_app"
+cp -R "$app_dir" "$applications_app"
+
+echo "Built and installed $applications_app"
