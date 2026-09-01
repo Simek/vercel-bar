@@ -39,6 +39,7 @@ const VISIBILITY_KEY_PREFIX: &str = "visibility";
 const SORT_LAST_DEPLOYMENT: i64 = 0;
 const SORT_ALPHABETICAL: i64 = 1;
 const CACHE_TTL: Duration = Duration::from_secs(300);
+
 static SNAPSHOT_CACHE: OnceCell<Mutex<Option<(Instant, AppSnapshot)>>> = OnceCell::new();
 static STATUS_ITEM: AtomicUsize = AtomicUsize::new(0);
 static APP_MENU: AtomicUsize = AtomicUsize::new(0);
@@ -52,6 +53,12 @@ static SETTINGS_TREE: AtomicUsize = AtomicUsize::new(0);
 static SETTINGS_SNAPSHOT: OnceCell<Mutex<Option<AppSnapshot>>> = OnceCell::new();
 static SETTINGS_PENDING_VISIBILITY: OnceCell<Mutex<Vec<(String, bool)>>> = OnceCell::new();
 static SETTINGS_ORIGINAL_TOKEN: OnceCell<Mutex<Option<String>>> = OnceCell::new();
+
+macro_rules! send_void {
+    ($receiver:expr, $($message:tt)*) => {{
+        let _: () = msg_send![$receiver, $($message)*];
+    }};
+}
 
 struct AppLifetime {
     _controller: ObjcId,
@@ -72,6 +79,7 @@ fn new_menu() -> ObjcId {
 pub fn run() {
     unsafe {
         dotenvy::dotenv().ok();
+
         let _pool = NSAutoreleasePool::new();
         let mtm = MainThreadMarker::new().expect("AppKit must run on the main thread");
         let app = NSApplication::sharedApplication(mtm);
@@ -80,16 +88,20 @@ pub fn run() {
         let status_bar = NSStatusBar::systemStatusBar();
         let status_item = status_bar.statusItemWithLength(NSVariableStatusItemLength);
         let status_item: ObjcId = Retained::into_raw(status_item).cast();
+
         STATUS_ITEM.store(status_item as usize, Ordering::Relaxed);
+
         let button: ObjcId = msg_send![status_item, button];
         set_status_icon(button, "triangle.fill");
 
         let menu = new_menu();
-        let _: () = msg_send![menu, setAutoenablesItems: Bool::NO];
-        let _: () = msg_send![menu, setDelegate: controller];
+        send_void![menu, setAutoenablesItems: Bool::NO];
+        send_void![menu, setDelegate: controller];
         populate_loading_menu(menu, controller);
-        let _: () = msg_send![status_item, setMenu: menu];
+        send_void![status_item, setMenu: menu];
+
         APP_MENU.store(menu as usize, Ordering::Relaxed);
+
         let _: ObjcId = msg_send![
             class!(NSTimer),
             scheduledTimerWithTimeInterval: 0.01f64,
@@ -204,12 +216,12 @@ extern "C" fn open_token_settings(_: ObjcId, _: Sel, _: ObjcId) {
 extern "C" fn quit_app(_: ObjcId, _: Sel, _: ObjcId) {
     unsafe {
         let app = app();
-        let _: () = msg_send![app, terminate: NIL];
+        send_void![app, terminate: NIL];
     }
 }
 
 unsafe fn rebuild_menu(menu: ObjcId, controller: ObjcId) {
-    let _: () = msg_send![app(), updateWindows];
+    send_void![app(), updateWindows];
     set_status_icon_for_item("arrow.3.trianglepath");
     clear_menu(menu);
     add_static_item(menu, "Refreshing Vercel projects…");
@@ -239,7 +251,7 @@ unsafe fn rebuild_menu(menu: ObjcId, controller: ObjcId) {
             &format!("Failed to read saved token: {err}"),
         ),
     }
-    let _: () = msg_send![menu, update];
+    send_void![menu, update];
 }
 
 extern "C" fn auto_refresh(this: ObjcId, _: Sel, _: ObjcId) {
@@ -271,10 +283,10 @@ unsafe fn set_status_icon(button: ObjcId, symbol: &str) {
     if image == NIL {
         return;
     }
-    let _: () = msg_send![button, setImage: image];
-    let _: () = msg_send![button, setTitle: ns_string("")];
-    let _: () = msg_send![button, displayIfNeeded];
-    let _: () = msg_send![app(), updateWindows];
+    send_void![button, setImage: image];
+    send_void![button, setTitle: ns_string("")];
+    send_void![button, displayIfNeeded];
+    send_void![app(), updateWindows];
 }
 
 unsafe fn populate_snapshot_menu(menu: ObjcId, controller: ObjcId, snapshot: AppSnapshot) {
@@ -331,10 +343,10 @@ unsafe fn add_team_menu(menu: ObjcId, controller: ObjcId, team: &TeamSnapshot) {
         accessibilityDescription: ns_string("Team"),
     ];
     if image != NIL {
-        let _: () = msg_send![item, setImage: image];
+        send_void![item, setImage: image];
     }
-    let _: () = msg_send![item, setEnabled: Bool::NO];
-    let _: () = msg_send![menu, addItem: item];
+    send_void![item, setEnabled: Bool::NO];
+    send_void![menu, addItem: item];
     let mut projects = team.projects.clone();
     if project_sort_order() == SORT_ALPHABETICAL {
         projects.sort_by_key(|project| project.name.to_ascii_lowercase());
@@ -371,7 +383,7 @@ unsafe fn add_project_menu(menu: ObjcId, controller: ObjcId, project: &ProjectSn
         "Deployment status",
     );
     if status_image != NIL {
-        let _: () = msg_send![project_item, setImage: status_image];
+        send_void![project_item, setImage: status_image];
     }
 
     unsafe fn colored_symbol_image(symbol: &str, color: ObjcId, description: &str) -> ObjcId {
@@ -391,7 +403,7 @@ unsafe fn add_project_menu(menu: ObjcId, controller: ObjcId, project: &ProjectSn
         if configured == NIL { image } else { configured }
     }
     let project_menu = new_menu();
-    let _: () = msg_send![project_menu, setAutoenablesItems: Bool::NO];
+    send_void![project_menu, setAutoenablesItems: Bool::NO];
 
     add_deployment_item(project_menu, &project.latest_status_label);
     add_separator(project_menu);
@@ -418,8 +430,8 @@ unsafe fn add_project_menu(menu: ObjcId, controller: ObjcId, project: &ProjectSn
         add_url_item(project_menu, "Visit production site", url, controller);
     }
 
-    let _: () = msg_send![project_item, setSubmenu: project_menu];
-    let _: () = msg_send![menu, addItem: project_item];
+    send_void![project_item, setSubmenu: project_menu];
+    send_void![menu, addItem: project_item];
 }
 
 fn cache_snapshot(snapshot: AppSnapshot) {
@@ -456,13 +468,13 @@ unsafe fn clear_menu(menu: ObjcId) {
             break;
         }
 
-        let _: () = msg_send![menu, removeItemAtIndex: 0isize];
+        send_void![menu, removeItemAtIndex: 0isize];
     }
 }
 
 unsafe fn add_separator(menu: ObjcId) {
     let separator: ObjcId = msg_send![class!(NSMenuItem), separatorItem];
-    let _: () = msg_send![menu, addItem: separator];
+    send_void![menu, addItem: separator];
 }
 
 unsafe fn add_static_item(menu: ObjcId, title: &str) {
@@ -474,11 +486,11 @@ unsafe fn add_static_item(menu: ObjcId, title: &str) {
             accessibilityDescription: ns_string("Information"),
         ];
         if image != NIL {
-            let _: () = msg_send![item, setImage: image];
+            send_void![item, setImage: image];
         }
     }
-    let _: () = msg_send![item, setEnabled: Bool::NO];
-    let _: () = msg_send![menu, addItem: item];
+    send_void![item, setEnabled: Bool::NO];
+    send_void![menu, addItem: item];
 }
 
 unsafe fn add_deployment_item(menu: ObjcId, label: &str) {
@@ -490,10 +502,10 @@ unsafe fn add_deployment_item(menu: ObjcId, label: &str) {
         accessibilityDescription: ns_string("Deployment date"),
     ];
     if image != NIL {
-        let _: () = msg_send![item, setImage: image];
+        send_void![item, setImage: image];
     }
-    let _: () = msg_send![item, setEnabled: Bool::NO];
-    let _: () = msg_send![menu, addItem: item];
+    send_void![item, setEnabled: Bool::NO];
+    send_void![menu, addItem: item];
 }
 
 unsafe fn add_action_item(menu: ObjcId, title: &str, action: Sel, controller: ObjcId) {
@@ -504,7 +516,7 @@ unsafe fn add_action_item(menu: ObjcId, title: &str, action: Sel, controller: Ob
         action: action,
         keyEquivalent: ns_string(""),
     ];
-    let _: () = msg_send![item, setTarget: controller];
+    send_void![item, setTarget: controller];
     let symbol = match title {
         "Refresh" => Some("arrow.clockwise"),
         "Settings…" => Some("gearshape"),
@@ -518,10 +530,10 @@ unsafe fn add_action_item(menu: ObjcId, title: &str, action: Sel, controller: Ob
             accessibilityDescription: ns_string(title),
         ];
         if image != NIL {
-            let _: () = msg_send![item, setImage: image];
+            send_void![item, setImage: image];
         }
     }
-    let _: () = msg_send![menu, addItem: item];
+    send_void![menu, addItem: item];
 }
 
 unsafe fn add_url_item(menu: ObjcId, title: &str, url: &str, controller: ObjcId) {
@@ -532,9 +544,9 @@ unsafe fn add_url_item(menu: ObjcId, title: &str, url: &str, controller: ObjcId)
         action: sel!(openRepresentedUrl:),
         keyEquivalent: ns_string(""),
     ];
-    let _: () = msg_send![item, setTarget: controller];
-    let _: () = msg_send![item, setRepresentedObject: ns_string(url)];
-    let _: () = msg_send![menu, addItem: item];
+    send_void![item, setTarget: controller];
+    send_void![item, setRepresentedObject: ns_string(url)];
+    send_void![menu, addItem: item];
 }
 
 unsafe fn make_menu_item(title: &str) -> ObjcId {
@@ -564,12 +576,12 @@ unsafe fn add_settings_symbol(content: ObjcId, symbol: &str, description: &str, 
             NSSize::new(20.0, 20.0)
         )
     ];
-    let _: () = msg_send![image_view, setImage: image];
-    let _: () = msg_send![image_view, setImageScaling: 3i64];
-    let _: () = msg_send![image_view, setImageAlignment: 0i64];
+    send_void![image_view, setImage: image];
+    send_void![image_view, setImageScaling: 3i64];
+    send_void![image_view, setImageAlignment: 0i64];
     let tint: ObjcId = msg_send![class!(NSColor), secondaryLabelColor];
-    let _: () = msg_send![image_view, setContentTintColor: tint];
-    let _: () = msg_send![content, addSubview: image_view];
+    send_void![image_view, setContentTintColor: tint];
+    send_void![content, addSubview: image_view];
 }
 
 unsafe fn settings_heading_font() -> ObjcId {
@@ -617,7 +629,7 @@ unsafe fn add_visibility_checkbox(parent: ObjcId, title: &str, key: String, x: f
         mtm,
     ))
     .cast();
-    let _: () = msg_send![button, setButtonType: 3i64];
+    send_void![button, setButtonType: 3i64];
     let checked = pending_visibility()
         .lock()
         .unwrap()
@@ -625,12 +637,12 @@ unsafe fn add_visibility_checkbox(parent: ObjcId, title: &str, key: String, x: f
         .find(|(pending_key, _)| pending_key == &key)
         .map(|(_, checked)| *checked)
         .unwrap_or_else(|| is_visible(&key));
-    let _: () = msg_send![button, setState: if checked { 1i64 } else { 0i64 }];
-    let _: () = msg_send![button, setFrame: NSRect::new(
+    send_void![button, setState: if checked { 1i64 } else { 0i64 }];
+    send_void![button, setFrame: NSRect::new(
         NSPoint::new(x, y),
         NSSize::new(380.0, 24.0)
     )];
-    let _: () = msg_send![parent, addSubview: button];
+    send_void![parent, addSubview: button];
     visibility_defaults()
         .lock()
         .unwrap()
@@ -693,11 +705,11 @@ unsafe fn add_visibility_tree(
     } else {
         let label: ObjcId =
             msg_send![class!(NSTextField), labelWithString: ns_string("No projects loaded yet.")];
-        let _: () = msg_send![label, setFrame: NSRect::new(
+        send_void![label, setFrame: NSRect::new(
             NSPoint::new(8.0, 8.0),
             NSSize::new(380.0, 24.0)
         )];
-        let _: () = msg_send![document, addSubview: label];
+        send_void![document, addSubview: label];
     }
 
     let container: ObjcId = msg_send![class!(NSVisualEffectView), alloc];
@@ -708,23 +720,23 @@ unsafe fn add_visibility_tree(
             NSSize::new(420.0, 218.0)
         )
     ];
-    let _: () = msg_send![container, setMaterial: 6i64];
-    let _: () = msg_send![container, setBlendingMode: 0i64];
-    let _: () = msg_send![container, setState: 1i64];
-    let _: () = msg_send![container, setWantsLayer: Bool::YES];
+    send_void![container, setMaterial: 6i64];
+    send_void![container, setBlendingMode: 0i64];
+    send_void![container, setState: 1i64];
+    send_void![container, setWantsLayer: Bool::YES];
     let container_layer: ObjcId = msg_send![container, layer];
-    let _: () = msg_send![container_layer, setCornerRadius: 10.0f64];
-    let _: () = msg_send![container_layer, setBorderWidth: 1.0f64];
+    send_void![container_layer, setCornerRadius: 10.0f64];
+    send_void![container_layer, setBorderWidth: 1.0f64];
     let border_color: ObjcId = msg_send![class!(NSColor), separatorColor];
     let border_cg_color: *mut CGColor =
         Retained::into_raw((&*(border_color as *const AnyObject as *const NSColor)).CGColor());
-    let _: () = msg_send![container_layer, setBorderColor: border_cg_color];
+    send_void![container_layer, setBorderColor: border_cg_color];
     let tint: ObjcId = msg_send![class!(NSColor), controlAccentColor];
     let tint: ObjcId = msg_send![tint, colorWithAlphaComponent: 0.06f64];
     let tint_cg_color: *mut CGColor =
         Retained::into_raw((&*(tint as *const AnyObject as *const NSColor)).CGColor());
-    let _: () = msg_send![container_layer, setBackgroundColor: tint_cg_color];
-    let _: () = msg_send![content, addSubview: container];
+    send_void![container_layer, setBackgroundColor: tint_cg_color];
+    send_void![content, addSubview: container];
 
     let scroll: ObjcId = msg_send![class!(NSScrollView), alloc];
     let scroll: ObjcId = msg_send![
@@ -734,19 +746,19 @@ unsafe fn add_visibility_tree(
             NSSize::new(404.0, 202.0)
         )
     ];
-    let _: () = msg_send![scroll, setHasVerticalScroller: Bool::YES];
-    let _: () = msg_send![scroll, setBorderType: 0i64];
-    let _: () = msg_send![scroll, setDrawsBackground: Bool::NO];
-    let _: () = msg_send![scroll, setDocumentView: document];
-    let _: () = msg_send![content, addSubview: scroll];
+    send_void![scroll, setHasVerticalScroller: Bool::YES];
+    send_void![scroll, setBorderType: 0i64];
+    send_void![scroll, setDrawsBackground: Bool::NO];
+    send_void![scroll, setDocumentView: document];
+    send_void![content, addSubview: scroll];
     let clip_view: ObjcId = msg_send![scroll, contentView];
     let clip_bounds: NSRect = msg_send![clip_view, bounds];
     let top_y = (document_height - clip_bounds.size.height).max(0.0);
-    let _: () = msg_send![
+    send_void![
         clip_view,
         scrollToPoint: NSPoint::new(0.0, top_y)
     ];
-    let _: () = msg_send![scroll, reflectScrolledClipView: clip_view];
+    send_void![scroll, reflectScrolledClipView: clip_view];
     pending_visibility().lock().unwrap().clear();
     scroll
 }
@@ -755,7 +767,7 @@ fn show_settings_modal(controller: ObjcId) -> Result<()> {
     unsafe {
         let mtm = MainThreadMarker::new().expect("AppKit must run on the main thread");
         let app = app();
-        let _: () = msg_send![app, activateIgnoringOtherApps: Bool::YES];
+        send_void![app, activateIgnoringOtherApps: Bool::YES];
         let initial_token = load_token()?;
         SETTINGS_ORIGINAL_TOKEN
             .get_or_init(|| Mutex::new(None))
@@ -784,15 +796,15 @@ fn show_settings_modal(controller: ObjcId) -> Result<()> {
             backing: 2u64,
             defer: Bool::NO,
         ];
-        let _: () = msg_send![window, setTitle: ns_string("Settings")];
-        let _: () = msg_send![window, setTitlebarAppearsTransparent: Bool::YES];
-        let _: () = msg_send![window, setTitleVisibility: 0i64];
-        let _: () = msg_send![window, setReleasedWhenClosed: Bool::NO];
-        let _: () = msg_send![window, setInitialFirstResponder: NIL];
+        send_void![window, setTitle: ns_string("Settings")];
+        send_void![window, setTitlebarAppearsTransparent: Bool::YES];
+        send_void![window, setTitleVisibility: 0i64];
+        send_void![window, setReleasedWhenClosed: Bool::NO];
+        send_void![window, setInitialFirstResponder: NIL];
         let close_button: ObjcId = msg_send![window, standardWindowButton: 2i64];
-        let _: () = msg_send![close_button, setTarget: controller];
-        let _: () = msg_send![close_button, setAction: sel!(settingsCancel:)];
-        let _: () = msg_send![window, center];
+        send_void![close_button, setTarget: controller];
+        send_void![close_button, setAction: sel!(settingsCancel:)];
+        send_void![window, center];
         let content: ObjcId = msg_send![window, contentView];
 
         let background: ObjcId = msg_send![class!(NSVisualEffectView), alloc];
@@ -803,11 +815,11 @@ fn show_settings_modal(controller: ObjcId) -> Result<()> {
                 NSSize::new(500.0, 560.0)
             )
         ];
-        let _: () = msg_send![background, setMaterial: 7i64];
-        let _: () = msg_send![background, setBlendingMode: 0i64];
-        let _: () = msg_send![background, setState: 1i64];
-        let _: () = msg_send![background, setAutoresizingMask: 18u64];
-        let _: () = msg_send![content, addSubview: background];
+        send_void![background, setMaterial: 7i64];
+        send_void![background, setBlendingMode: 0i64];
+        send_void![background, setState: 1i64];
+        send_void![background, setAutoresizingMask: 18u64];
+        send_void![content, addSubview: background];
 
         visibility_defaults().lock().unwrap().clear();
         pending_visibility().lock().unwrap().clear();
@@ -820,32 +832,32 @@ fn show_settings_modal(controller: ObjcId) -> Result<()> {
         add_settings_symbol(content, "person.crop.circle", "Vercel account", 499.0);
         let account_label: ObjcId =
             msg_send![class!(NSTextField), labelWithString: ns_string("Vercel Account")];
-        let _: () = msg_send![account_label, setFrame: NSRect::new(
+        send_void![account_label, setFrame: NSRect::new(
             NSPoint::new(56.0, 498.0), NSSize::new(300.0, 24.0)
         )];
         let heading_font = settings_heading_font();
-        let _: () = msg_send![account_label, setFont: heading_font];
-        let _: () = msg_send![content, addSubview: account_label];
+        send_void![account_label, setFont: heading_font];
+        send_void![content, addSubview: account_label];
         let label: ObjcId = msg_send![class!(NSTextField), labelWithString: ns_string(
             "Vercel token (used to load teams and projects):"
         )];
-        let _: () = msg_send![label, setFrame: NSRect::new(
+        send_void![label, setFrame: NSRect::new(
             NSPoint::new(56.0, 472.0), NSSize::new(420.0, 20.0)
         )];
         let secondary_color: ObjcId = msg_send![class!(NSColor), secondaryLabelColor];
-        let _: () = msg_send![label, setTextColor: secondary_color];
-        let _: () = msg_send![content, addSubview: label];
+        send_void![label, setTextColor: secondary_color];
+        send_void![content, addSubview: label];
 
         let text_field: ObjcId = msg_send![class!(NSSecureTextField), alloc];
         let text_field: ObjcId = msg_send![text_field, initWithFrame: NSRect::new(
             NSPoint::new(56.0, 428.0), NSSize::new(420.0, 36.0)
         )];
-        let _: () = msg_send![text_field, setEditable: Bool::YES];
-        let _: () = msg_send![text_field, setSelectable: Bool::YES];
+        send_void![text_field, setEditable: Bool::YES];
+        send_void![text_field, setSelectable: Bool::YES];
         if let Some(token) = initial_token {
-            let _: () = msg_send![text_field, setStringValue: ns_string(&token)];
+            send_void![text_field, setStringValue: ns_string(&token)];
         }
-        let _: () = msg_send![content, addSubview: text_field];
+        send_void![content, addSubview: text_field];
 
         let clear: ObjcId = Retained::into_raw(NSButton::buttonWithTitle_target_action(
             &*NSString::from_str("Clear Token"),
@@ -854,7 +866,7 @@ fn show_settings_modal(controller: ObjcId) -> Result<()> {
             mtm,
         ))
         .cast();
-        let _: () = msg_send![clear, setFrame: NSRect::new(
+        send_void![clear, setFrame: NSRect::new(
             NSPoint::new(56.0, 388.0), NSSize::new(120.0, 28.0)
         )];
         let trash: ObjcId = msg_send![
@@ -863,12 +875,12 @@ fn show_settings_modal(controller: ObjcId) -> Result<()> {
             accessibilityDescription: ns_string("Delete"),
         ];
         if trash != NIL {
-            let _: () = msg_send![clear, setImage: trash];
-            let _: () = msg_send![clear, setImagePosition: 2i64];
-            let _: () = msg_send![clear, setImageHugsTitle: Bool::NO];
+            send_void![clear, setImage: trash];
+            send_void![clear, setImagePosition: 2i64];
+            send_void![clear, setImageHugsTitle: Bool::NO];
         }
-        let _: () = msg_send![clear, setHasDestructiveAction: Bool::YES];
-        let _: () = msg_send![content, addSubview: clear];
+        send_void![clear, setHasDestructiveAction: Bool::YES];
+        send_void![content, addSubview: clear];
         let generate: ObjcId = Retained::into_raw(NSButton::buttonWithTitle_target_action(
             &*NSString::from_str("Generate Token"),
             Some(&*(controller as *const AnyObject)),
@@ -876,7 +888,7 @@ fn show_settings_modal(controller: ObjcId) -> Result<()> {
             mtm,
         ))
         .cast();
-        let _: () = msg_send![generate, setFrame: NSRect::new(
+        send_void![generate, setFrame: NSRect::new(
             NSPoint::new(336.0, 388.0), NSSize::new(140.0, 28.0)
         )];
         let external_link: ObjcId = msg_send![
@@ -885,26 +897,26 @@ fn show_settings_modal(controller: ObjcId) -> Result<()> {
             accessibilityDescription: ns_string("Open externally"),
         ];
         if external_link != NIL {
-            let _: () = msg_send![generate, setImage: external_link];
-            let _: () = msg_send![generate, setImagePosition: 3i64];
-            let _: () = msg_send![generate, setImageHugsTitle: Bool::NO];
+            send_void![generate, setImage: external_link];
+            send_void![generate, setImagePosition: 3i64];
+            send_void![generate, setImageHugsTitle: Bool::NO];
         }
-        let _: () = msg_send![content, addSubview: generate];
+        send_void![content, addSubview: generate];
 
         add_settings_symbol(content, "square.grid.2x2", "Projects display", 337.0);
         let display_label: ObjcId =
             msg_send![class!(NSTextField), labelWithString: ns_string("Projects Display")];
-        let _: () = msg_send![display_label, setFrame: NSRect::new(
+        send_void![display_label, setFrame: NSRect::new(
             NSPoint::new(56.0, 336.0), NSSize::new(420.0, 24.0)
         )];
-        let _: () = msg_send![display_label, setFont: heading_font];
-        let _: () = msg_send![content, addSubview: display_label];
+        send_void![display_label, setFont: heading_font];
+        send_void![content, addSubview: display_label];
         let sort_label: ObjcId =
             msg_send![class!(NSTextField), labelWithString: ns_string("Projects sort order")];
-        let _: () = msg_send![sort_label, setFrame: NSRect::new(
+        send_void![sort_label, setFrame: NSRect::new(
             NSPoint::new(56.0, 302.0), NSSize::new(160.0, 22.0)
         )];
-        let _: () = msg_send![content, addSubview: sort_label];
+        send_void![content, addSubview: sort_label];
         let sort_popup: ObjcId = msg_send![class!(NSPopUpButton), alloc];
         let sort_popup: ObjcId = msg_send![
             sort_popup,
@@ -914,12 +926,12 @@ fn show_settings_modal(controller: ObjcId) -> Result<()> {
             ),
             pullsDown: Bool::NO,
         ];
-        let _: () = msg_send![sort_popup, setTarget: controller];
-        let _: () = msg_send![sort_popup, setAction: sel!(settingsSortChanged:)];
-        let _: () = msg_send![sort_popup, addItemWithTitle: ns_string("Last deployment date")];
-        let _: () = msg_send![sort_popup, addItemWithTitle: ns_string("Alphabetically")];
-        let _: () = msg_send![sort_popup, selectItemAtIndex: project_sort_order()];
-        let _: () = msg_send![content, addSubview: sort_popup];
+        send_void![sort_popup, setTarget: controller];
+        send_void![sort_popup, setAction: sel!(settingsSortChanged:)];
+        send_void![sort_popup, addItemWithTitle: ns_string("Last deployment date")];
+        send_void![sort_popup, addItemWithTitle: ns_string("Alphabetically")];
+        send_void![sort_popup, selectItemAtIndex: project_sort_order()];
+        send_void![content, addSubview: sort_popup];
         let tree = add_visibility_tree(content, snapshot.as_ref(), project_sort_order());
         SETTINGS_TREE.store(tree as usize, Ordering::Relaxed);
 
@@ -929,7 +941,7 @@ fn show_settings_modal(controller: ObjcId) -> Result<()> {
             target: controller,
             action: sel!(settingsCancel:),
         ];
-        let _: () = msg_send![cancel, setFrame: NSRect::new(
+        send_void![cancel, setFrame: NSRect::new(
             NSPoint::new(330.0, 20.0), NSSize::new(70.0, 32.0)
         )];
         let save: ObjcId = msg_send![
@@ -938,25 +950,25 @@ fn show_settings_modal(controller: ObjcId) -> Result<()> {
             target: controller,
             action: sel!(settingsSave:),
         ];
-        let _: () = msg_send![save, setFrame: NSRect::new(
+        send_void![save, setFrame: NSRect::new(
             NSPoint::new(414.0, 20.0), NSSize::new(70.0, 32.0)
         )];
-        let _: () = msg_send![save, setKeyEquivalent: ns_string("\r")];
-        let _: () = msg_send![save, setKeyEquivalentModifierMask: 0u64];
-        let _: () = msg_send![cancel, setKeyEquivalent: ns_string("\u{1b}")];
-        let _: () = msg_send![cancel, setKeyEquivalentModifierMask: 0u64];
-        let _: () = msg_send![save, setBezelStyle: 1i64];
-        let _: () = msg_send![content, addSubview: cancel];
-        let _: () = msg_send![content, addSubview: save];
+        send_void![save, setKeyEquivalent: ns_string("\r")];
+        send_void![save, setKeyEquivalentModifierMask: 0u64];
+        send_void![cancel, setKeyEquivalent: ns_string("\u{1b}")];
+        send_void![cancel, setKeyEquivalentModifierMask: 0u64];
+        send_void![save, setBezelStyle: 1i64];
+        send_void![content, addSubview: cancel];
+        send_void![content, addSubview: save];
         SETTINGS_WINDOW.store(window as usize, Ordering::Relaxed);
         SETTINGS_FIELD.store(text_field as usize, Ordering::Relaxed);
         SETTINGS_SORT.store(sort_popup as usize, Ordering::Relaxed);
         SETTINGS_RESPONSE.store(0, Ordering::Relaxed);
-        let _: () = msg_send![window, makeKeyAndOrderFront: NIL];
+        send_void![window, makeKeyAndOrderFront: NIL];
         let _: Bool = msg_send![window, makeFirstResponder: NIL];
         let _: i64 = msg_send![app, runModalForWindow: window];
         let response = SETTINGS_RESPONSE.load(Ordering::Relaxed) as i64;
-        let _: () = msg_send![window, orderOut: NIL];
+        send_void![window, orderOut: NIL];
         SETTINGS_WINDOW.store(0, Ordering::Relaxed);
         SETTINGS_FIELD.store(0, Ordering::Relaxed);
         SETTINGS_SORT.store(0, Ordering::Relaxed);
@@ -976,11 +988,11 @@ fn show_settings_modal(controller: ObjcId) -> Result<()> {
 
 unsafe fn show_error_alert(title: &str, message: &str) {
     let app = app();
-    let _: () = msg_send![app, activateIgnoringOtherApps: Bool::YES];
+    send_void![app, activateIgnoringOtherApps: Bool::YES];
 
     let alert: ObjcId = msg_send![class!(NSAlert), new];
-    let _: () = msg_send![alert, setMessageText: ns_string(title)];
-    let _: () = msg_send![alert, setInformativeText: ns_string(message)];
+    send_void![alert, setMessageText: ns_string(title)];
+    send_void![alert, setInformativeText: ns_string(message)];
     let _: ObjcId = msg_send![alert, addButtonWithTitle: ns_string("OK")];
     let _: i64 = msg_send![alert, runModal];
 }
@@ -1006,7 +1018,7 @@ fn save_token(token: &str) -> Result<()> {
         .context("Failed to save token to the macOS keychain")?;
     unsafe {
         let defaults: ObjcId = msg_send![class!(NSUserDefaults), standardUserDefaults];
-        let _: () = msg_send![
+        send_void![
             defaults,
             setObject: ns_string(token),
             forKey: ns_string(TOKEN_DEFAULTS_KEY),
@@ -1021,7 +1033,7 @@ fn clear_token() -> Result<()> {
         Ok(()) | Err(keyring::Error::NoEntry) => {
             unsafe {
                 let defaults: ObjcId = msg_send![class!(NSUserDefaults), standardUserDefaults];
-                let _: () = msg_send![defaults, removeObjectForKey: ns_string(TOKEN_DEFAULTS_KEY)];
+                send_void![defaults, removeObjectForKey: ns_string(TOKEN_DEFAULTS_KEY)];
             }
             Ok(())
         }
@@ -1149,7 +1161,7 @@ extern "C" fn settings_sort_changed(_: ObjcId, _: Sel, sender: ObjcId) {
             return;
         }
         if old_tree != NIL {
-            let _: () = msg_send![old_tree, removeFromSuperview];
+            send_void![old_tree, removeFromSuperview];
         }
         {
             let controls = visibility_defaults().lock().unwrap();
@@ -1204,7 +1216,7 @@ extern "C" fn settings_save(_: ObjcId, _: Sel, _: ObjcId) {
                 for (key, button) in visibility_defaults().lock().unwrap().iter() {
                     let button = *button as ObjcId;
                     let state: i64 = msg_send![button, state];
-                    let _: () = msg_send![
+                    send_void![
                         defaults,
                         setBool: state == 1i64,
                         forKey: ns_string(key),
@@ -1215,7 +1227,7 @@ extern "C" fn settings_save(_: ObjcId, _: Sel, _: ObjcId) {
                     clear_snapshot_cache();
                 }
                 SETTINGS_RESPONSE.store(SETTINGS_SAVE as usize, Ordering::Relaxed);
-                let _: () = msg_send![app(), stopModal];
+                send_void![app(), stopModal];
             }
 
             Err(err) => show_error_alert("Failed to update Vercel token", &err.to_string()),
@@ -1238,14 +1250,14 @@ fn normalize_token(value: &str) -> String {
 extern "C" fn settings_cancel(_: ObjcId, _: Sel, _: ObjcId) {
     SETTINGS_RESPONSE.store(0, Ordering::Relaxed);
     unsafe {
-        let _: () = msg_send![app(), stopModal];
+        send_void![app(), stopModal];
     }
 }
 
 extern "C" fn settings_clear(_: ObjcId, _: Sel, _: ObjcId) {
     SETTINGS_RESPONSE.store(SETTINGS_CLEAR as usize, Ordering::Relaxed);
     unsafe {
-        let _: () = msg_send![app(), stopModal];
+        send_void![app(), stopModal];
     }
 }
 
@@ -1264,7 +1276,7 @@ fn project_sort_order() -> i64 {
 fn set_project_sort_order(order: i64) {
     unsafe {
         let defaults: ObjcId = msg_send![class!(NSUserDefaults), standardUserDefaults];
-        let _: () = msg_send![
+        send_void![
             defaults,
             setInteger: order,
             forKey: ns_string(PROJECT_SORT_KEY),
