@@ -1,4 +1,6 @@
 .env
 .idea
+build
+project.xcworkspace
 target
 VercelBar.app

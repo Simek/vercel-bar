@@ -1,46 +1,11 @@
 #!/bin/sh
 set -eu
 
-app_dir="VercelBar.app"
-binary="target/release/vercel-bar"
+rm -rf build
+xcodebuild -project VercelBar.xcodeproj -scheme VercelBar -configuration Release -derivedDataPath build build
+app_dir="build/Build/Products/Release/VercelBar.app"
 
-cargo build --release
-
-rm -rf "$app_dir"
-mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources"
-cp "$binary" "$app_dir/Contents/MacOS/vercel-bar"
-chmod +x "$app_dir/Contents/MacOS/vercel-bar"
-
-cat > "$app_dir/Contents/Info.plist" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleDevelopmentRegion</key>
-  <string>en</string>
-  <key>CFBundleExecutable</key>
-  <string>vercel-bar</string>
-  <key>CFBundleIdentifier</key>
-  <string>com.simek.vercel-bar</string>
-  <key>CFBundleInfoDictionaryVersion</key>
-  <string>6.0</string>
-  <key>CFBundleName</key>
-  <string>VercelBar</string>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
-  <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
-  <key>CFBundleVersion</key>
-  <string>0.1.0</string>
-  <key>LSMinimumSystemVersion</key>
-  <string>10.15</string>
-  <key>LSUIElement</key>
-  <true/>
-</dict>
-</plist>
-PLIST
-
-applications_app="/Applications/$app_dir"
+applications_app="/Applications/VercelBar.app"
 rm -rf "$applications_app"
 cp -R "$app_dir" "$applications_app"
 
