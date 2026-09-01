@@ -28,6 +28,7 @@ use crate::vercel::{AppSnapshot, ProjectSnapshot, TeamSnapshot, VercelClient};
 const KEYRING_SERVICE: &str = "dev-tree";
 const KEYRING_ACCOUNT: &str = "vercel-token";
 const TOKEN_DEFAULTS_KEY: &str = "vercelToken";
+const VERCEL_TOKEN_SETTINGS_URL: &str = "https://vercel.com/account/settings/tokens";
 const SETTINGS_SAVE: i64 = 1;
 const SETTINGS_CLEAR: i64 = 2;
 const PROJECT_SORT_KEY: &str = "projectSortOrder";
@@ -166,6 +167,14 @@ extern "C" fn open_represented_url(_: &Object, _: Sel, sender: id) {
 
         if let Err(err) = open_url(&ns_string_to_rust(represented)) {
             show_error_alert("Failed to open link", &err.to_string());
+        }
+    }
+}
+
+extern "C" fn open_token_settings(_: &Object, _: Sel, _: id) {
+    if let Err(err) = open_url(VERCEL_TOKEN_SETTINGS_URL) {
+        unsafe {
+            show_error_alert("Failed to open Vercel token settings", &err.to_string());
         }
     }
 }
@@ -792,9 +801,40 @@ fn show_settings_modal(controller: id) -> Result<()> {
 
         let clear: id = msg_send![class!(NSButton), buttonWithTitle: ns_string("Clear Token") target: controller action: sel!(settingsClear:)];
         let _: () = msg_send![clear, setFrame: NSRect::new(
-            cocoa::foundation::NSPoint::new(56.0, 388.0), NSSize::new(112.0, 28.0)
+            cocoa::foundation::NSPoint::new(56.0, 388.0), NSSize::new(120.0, 28.0)
         )];
+        let trash: id = msg_send![
+            class!(NSImage),
+            imageWithSystemSymbolName: ns_string("trash")
+            accessibilityDescription: ns_string("Delete")
+        ];
+        if trash != nil {
+            let _: () = msg_send![clear, setImage: trash];
+            let _: () = msg_send![clear, setImagePosition: 2i64];
+            let _: () = msg_send![clear, setImageHugsTitle: NO];
+        }
+        let _: () = msg_send![clear, setHasDestructiveAction: YES];
         let _: () = msg_send![content, addSubview: clear];
+        let generate: id = msg_send![
+            class!(NSButton),
+            buttonWithTitle: ns_string("Generate Token")
+            target: controller
+            action: sel!(openTokenSettings:)
+        ];
+        let _: () = msg_send![generate, setFrame: NSRect::new(
+            cocoa::foundation::NSPoint::new(336.0, 388.0), NSSize::new(140.0, 28.0)
+        )];
+        let external_link: id = msg_send![
+            class!(NSImage),
+            imageWithSystemSymbolName: ns_string("arrow.up.right")
+            accessibilityDescription: ns_string("Open externally")
+        ];
+        if external_link != nil {
+            let _: () = msg_send![generate, setImage: external_link];
+            let _: () = msg_send![generate, setImagePosition: 3i64];
+            let _: () = msg_send![generate, setImageHugsTitle: NO];
+        }
+        let _: () = msg_send![content, addSubview: generate];
 
         add_settings_symbol(content, "square.grid.2x2", "Projects display", 337.0);
         let display_label: id =
@@ -999,6 +1039,10 @@ fn menu_controller_class() -> &'static Class {
         decl.add_method(
             sel!(openRepresentedUrl:),
             open_represented_url as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(openTokenSettings:),
+            open_token_settings as extern "C" fn(&Object, Sel, id),
         );
         decl.add_method(sel!(quitApp:), quit_app as extern "C" fn(&Object, Sel, id));
         decl.add_method(sel!(noop:), noop as extern "C" fn(&Object, Sel, id));
