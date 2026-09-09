@@ -405,9 +405,6 @@ unsafe fn add_project_menu(menu: ObjcId, controller: ObjcId, project: &ProjectSn
     let project_menu = new_menu();
     send_void![project_menu, setAutoenablesItems: Bool::NO];
 
-    add_deployment_item(project_menu, &project.latest_status_label);
-    add_separator(project_menu);
-
     add_url_item(
         project_menu,
         "Open project dashboard",
@@ -415,20 +412,18 @@ unsafe fn add_project_menu(menu: ObjcId, controller: ObjcId, project: &ProjectSn
         controller,
     );
 
-    if let Some(url) = &project.latest_deployment_url {
-        add_url_item(project_menu, "Open latest deployment", url, controller);
+    add_separator(project_menu);
+    if let Some(url) = &project.production_url {
+        add_url_item(project_menu, "Open production website", url, controller);
+        add_url_item(project_menu, "Open production logs", &project.logs_url, controller);
     }
 
-    add_url_item(
-        project_menu,
-        "Open website logs",
-        &project.logs_url,
-        controller,
-    );
-    if let Some(url) = &project.production_url {
+    add_separator(project_menu);
+    if let Some(url) = &project.latest_deployment_url {
+        add_url_item(project_menu, "Open latest deployment", url, controller);
         add_separator(project_menu);
-        add_url_item(project_menu, "Visit production site", url, controller);
     }
+    add_deployment_item(project_menu, &project.latest_status_label);
 
     send_void![project_item, setSubmenu: project_menu];
     send_void![menu, addItem: project_item];

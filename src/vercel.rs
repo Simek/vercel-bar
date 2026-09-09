@@ -226,7 +226,19 @@ fn deployment_label(deployment: &Deployment) -> String {
     let date = deployment
         .created_at
         .and_then(chrono::DateTime::from_timestamp_millis)
-        .map(|time| time.format("%Y-%m-%d %H:%M").to_string())
+        .map(|time| {
+            let age = chrono::Utc::now().signed_duration_since(time);
+            let relative = if age.num_minutes() < 1 {
+                "less than a minute".to_owned()
+            } else if age.num_hours() < 1 {
+                format!("{}min", age.num_minutes())
+            } else if age.num_days() < 1 {
+                format!("{}h", age.num_hours())
+            } else {
+                format!("{}d", age.num_days())
+            };
+            format!("{} ({} ago)", time.format("%Y-%m-%d %H:%M"), relative)
+        })
         .unwrap_or_else(|| "unknown date".to_owned());
     format!("Deployment: {date}")
 }
