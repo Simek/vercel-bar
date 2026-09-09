@@ -39,6 +39,7 @@ const VISIBILITY_KEY_PREFIX: &str = "visibility";
 const SORT_LAST_DEPLOYMENT: i64 = 0;
 const SORT_ALPHABETICAL: i64 = 1;
 const CACHE_TTL: Duration = Duration::from_secs(300);
+const COMMAND_MODIFIER_MASK: u64 = 1 << 20;
 
 static SNAPSHOT_CACHE: OnceCell<Mutex<Option<(Instant, AppSnapshot)>>> = OnceCell::new();
 static STATUS_ITEM: AtomicUsize = AtomicUsize::new(0);
@@ -138,6 +139,10 @@ unsafe fn populate_loading_menu(menu: ObjcId, controller: ObjcId) {
 }
 
 extern "C" fn menu_will_open(this: ObjcId, _: Sel, menu: ObjcId) {
+    unsafe {
+        clear_project_shortcuts(APP_MENU.load(Ordering::Relaxed) as ObjcId);
+        configure_project_shortcuts(menu);
+    }
     if cached_snapshot().is_some() {
         return;
     }
@@ -404,6 +409,7 @@ unsafe fn add_project_menu(menu: ObjcId, controller: ObjcId, project: &ProjectSn
     }
     let project_menu = new_menu();
     send_void![project_menu, setAutoenablesItems: Bool::NO];
+    send_void![project_menu, setDelegate: controller];
 
     add_url_item(
         project_menu,
@@ -504,14 +510,23 @@ unsafe fn add_deployment_item(menu: ObjcId, label: &str) {
 }
 
 unsafe fn add_action_item(menu: ObjcId, title: &str, action: Sel, controller: ObjcId) {
+    let key_equivalent = match title {
+        "Refresh" => "r",
+        "Settings…" => ",",
+        "Quit" => "q",
+        _ => "",
+    };
     let item: ObjcId = msg_send![class!(NSMenuItem), alloc];
     let item: ObjcId = msg_send![
         item,
         initWithTitle: ns_string(title),
         action: action,
-        keyEquivalent: ns_string(""),
+        keyEquivalent: ns_string(key_equivalent),
     ];
     send_void![item, setTarget: controller];
+    if !key_equivalent.is_empty() {
+        send_void![item, setKeyEquivalentModifierMask: COMMAND_MODIFIER_MASK];
+    }
     let symbol = match title {
         "Refresh" => Some("arrow.clockwise"),
         "Settings…" => Some("gearshape"),
@@ -542,6 +557,53 @@ unsafe fn add_url_item(menu: ObjcId, title: &str, url: &str, controller: ObjcId)
     send_void![item, setTarget: controller];
     send_void![item, setRepresentedObject: ns_string(url)];
     send_void![menu, addItem: item];
+}
+
+unsafe fn configure_project_shortcuts(menu: ObjcId) {
+    let count: isize = msg_send![menu, numberOfItems];
+    for index in 0..count {
+        let item: ObjcId = msg_send![menu, itemAtIndex: index];
+        if item == NIL {
+            continue;
+        }
+        let title: ObjcId = msg_send![item, title];
+        let key_equivalent = match ns_string_to_rust(title).as_str() {
+            "Open project dashboard" => "p",
+            "Open production logs" => "l",
+            "Open latest deployment" => "d",
+            _ => "",
+        };
+        send_void![item, setKeyEquivalent: ns_string(key_equivalent)];
+        if !key_equivalent.is_empty() {
+            send_void![item, setKeyEquivalentModifierMask: COMMAND_MODIFIER_MASK];
+        }
+    }
+}
+
+unsafe fn clear_project_shortcuts(menu: ObjcId) {
+    if menu == NIL {
+        return;
+    }
+
+    let count: isize = msg_send![menu, numberOfItems];
+    for index in 0..count {
+        let item: ObjcId = msg_send![menu, itemAtIndex: index];
+        if item == NIL {
+            continue;
+        }
+
+        let title: ObjcId = msg_send![item, title];
+        match ns_string_to_rust(title).as_str() {
+            "Open project dashboard" | "Open production logs" | "Open latest deployment" => {
+                send_void![item, setKeyEquivalent: ns_string("")];
+                send_void![item, setKeyEquivalentModifierMask: 0u64];
+            }
+            _ => {}
+        }
+
+        let submenu: ObjcId = msg_send![item, submenu];
+        clear_project_shortcuts(submenu);
+    }
 }
 
 unsafe fn make_menu_item(title: &str) -> ObjcId {
