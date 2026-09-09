@@ -26,6 +26,7 @@ pub struct ProjectSnapshot {
     pub production_url: Option<String>,
     pub latest_status: DeploymentStatus,
     pub latest_status_label: String,
+    pub page_views: Option<u64>,
     latest_deployment_at: Option<i64>,
 }
 
@@ -137,7 +138,13 @@ impl VercelClient {
 
         let mut snapshots = all_projects
             .into_iter()
-            .map(|project| ProjectSnapshot::from_api(project, scope_slug))
+            .map(|project| {
+                let project_id = project.id.as_deref().unwrap_or(&project.name);
+                let page_views = self
+                    .fetch_page_views(project_id, team_id, Some(scope_slug))
+                    .ok();
+                ProjectSnapshot::from_api(project, scope_slug, page_views)
+            })
             .collect::<Vec<_>>();
         snapshots.sort_by(|left, right| {
             right
@@ -151,6 +158,30 @@ impl VercelClient {
         });
 
         Ok(snapshots)
+    }
+
+    fn fetch_page_views(
+        &self,
+        project_id: &str,
+        team_id: Option<&str>,
+        team_slug: Option<&str>,
+    ) -> Result<u64> {
+        let until = chrono::Utc::now();
+        let since = until - chrono::Duration::days(7);
+        let mut query = vec![
+            ("projectId", project_id.to_owned()),
+            ("since", since.timestamp_millis().to_string()),
+            ("until", until.timestamp_millis().to_string()),
+        ];
+        if let Some(team_id) = team_id {
+            query.push(("teamId", team_id.to_owned()));
+        }
+        if let Some(team_slug) = team_slug {
+            query.push(("slug", team_slug.to_owned()));
+        }
+        let response: PageViewsResponse =
+            self.get_json("/v1/query/web-analytics/visits/count", &query)?;
+        Ok(response.data.pageviews)
     }
 
     fn get_json<T>(&self, path: &str, query: &[(&str, String)]) -> Result<T>
@@ -181,7 +212,7 @@ impl ProjectSnapshot {
         self.latest_deployment_at
     }
 
-    fn from_api(project: Project, scope_slug: &str) -> Self {
+    fn from_api(project: Project, scope_slug: &str, page_views: Option<u64>) -> Self {
         let dashboard_url = format!("https://vercel.com/{scope_slug}/{}", project.name);
         let logs_url = format!("{dashboard_url}/logs");
         let latest = project.latest_deployment();
@@ -217,6 +248,7 @@ impl ProjectSnapshot {
             production_url,
             latest_status,
             latest_status_label,
+            page_views,
             latest_deployment_at: latest.as_ref().and_then(|deployment| deployment.created_at),
         }
     }
@@ -240,11 +272,21 @@ fn deployment_label(deployment: &Deployment) -> String {
             format!("{} ({} ago)", time.format("%Y-%m-%d %H:%M"), relative)
         })
         .unwrap_or_else(|| "unknown date".to_owned());
-    format!("Deployment: {date}")
+    format!("{date}")
 }
 
 #[derive(Debug, Deserialize)]
 struct UserResponse {}
+
+#[derive(Debug, Deserialize)]
+struct PageViewsResponse {
+    data: PageViewsData,
+}
+
+#[derive(Debug, Deserialize)]
+struct PageViewsData {
+    pageviews: u64,
+}
 
 #[derive(Debug, Deserialize)]
 struct TeamsResponse {
@@ -275,6 +317,7 @@ struct Pagination {
 
 #[derive(Debug, Deserialize)]
 struct Project {
+    id: Option<String>,
     name: String,
     #[serde(default, rename = "latestDeployments")]
     latest_deployments: Vec<Deployment>,

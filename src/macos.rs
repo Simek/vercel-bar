@@ -429,7 +429,11 @@ unsafe fn add_project_menu(menu: ObjcId, controller: ObjcId, project: &ProjectSn
         add_url_item(project_menu, "Open latest deployment", url, controller);
         add_separator(project_menu);
     }
+    add_menu_header(project_menu, "Deployment information");
     add_deployment_item(project_menu, &project.latest_status_label);
+    if let Some(page_views) = project.page_views {
+        add_page_views_item(project_menu, page_views);
+    }
 
     send_void![project_item, setSubmenu: project_menu];
     send_void![menu, addItem: project_item];
@@ -478,6 +482,14 @@ unsafe fn add_separator(menu: ObjcId) {
     send_void![menu, addItem: separator];
 }
 
+unsafe fn add_menu_header(menu: ObjcId, title: &str) {
+    let header: ObjcId = msg_send![
+        class!(NSMenuItem),
+        sectionHeaderWithTitle: ns_string(title)
+    ];
+    send_void![menu, addItem: header];
+}
+
 unsafe fn add_static_item(menu: ObjcId, title: &str) {
     let item = make_menu_item(title);
     if title == "Add a Vercel token in Settings." {
@@ -507,6 +519,38 @@ unsafe fn add_deployment_item(menu: ObjcId, label: &str) {
     }
     send_void![item, setEnabled: Bool::NO];
     send_void![menu, addItem: item];
+}
+
+unsafe fn add_page_views_item(menu: ObjcId, page_views: u64) {
+    let title = format!("{} (last 7d)", format_number(page_views));
+    let item = make_menu_item(&title);
+    let image: ObjcId = msg_send![
+        class!(NSImage),
+        imageWithSystemSymbolName: ns_string("person.circle"),
+        accessibilityDescription: ns_string("Page views"),
+    ];
+    if image != NIL {
+        send_void![item, setImage: image];
+    }
+    send_void![item, setEnabled: Bool::NO];
+    send_void![menu, addItem: item];
+}
+
+fn format_number(value: u64) -> String {
+    let digits = value.to_string();
+    let first_group_len = digits.len() % 3;
+    let first_group_len = if first_group_len == 0 {
+        3
+    } else {
+        first_group_len
+    };
+    let mut formatted = String::with_capacity(digits.len() + digits.len() / 3);
+    formatted.push_str(&digits[..first_group_len]);
+    for chunk in digits.as_bytes()[first_group_len..].chunks(3) {
+        formatted.push(',');
+        formatted.push_str(std::str::from_utf8(chunk).expect("numeric digits are valid UTF-8"));
+    }
+    formatted
 }
 
 unsafe fn add_action_item(menu: ObjcId, title: &str, action: Sel, controller: ObjcId) {
