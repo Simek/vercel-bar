@@ -196,7 +196,17 @@ impl ProjectSnapshot {
         let latest_deployment_url = latest
             .as_ref()
             .and_then(|deployment| deployment.inspector_url.clone())
-            .or_else(|| Some(format!("{dashboard_url}/deployments")));
+            .or_else(|| {
+                latest
+                    .as_ref()
+                    .and_then(|deployment| {
+                        deployment
+                            .uid
+                            .as_deref()
+                            .or(deployment.id.as_deref())
+                    })
+                    .map(|deployment_id| format!("{dashboard_url}/{deployment_id}"))
+            });
         let production_url = latest.as_ref().and_then(Deployment::production_url);
 
         Self {
@@ -276,6 +286,8 @@ impl Project {
 
 #[derive(Clone, Debug, Deserialize)]
 struct Deployment {
+    uid: Option<String>,
+    id: Option<String>,
     url: Option<String>,
     #[serde(default, rename = "automaticAliases")]
     automatic_aliases: Vec<String>,
