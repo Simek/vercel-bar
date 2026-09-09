@@ -612,13 +612,13 @@ unsafe fn configure_project_shortcuts(menu: ObjcId) {
         }
         let title: ObjcId = msg_send![item, title];
         let key_equivalent = match ns_string_to_rust(title).as_str() {
-            "Open project dashboard" => "p",
-            "Open production logs" => "l",
-            "Open latest deployment" => "d",
-            _ => "",
+            "Open project dashboard" => Some("p"),
+            "Open production logs" => Some("l"),
+            "Open latest deployment" => Some("d"),
+            _ => None,
         };
-        send_void![item, setKeyEquivalent: ns_string(key_equivalent)];
-        if !key_equivalent.is_empty() {
+        if let Some(key_equivalent) = key_equivalent {
+            send_void![item, setKeyEquivalent: ns_string(key_equivalent)];
             send_void![item, setKeyEquivalentModifierMask: COMMAND_MODIFIER_MASK];
         }
     }
