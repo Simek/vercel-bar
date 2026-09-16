@@ -348,7 +348,7 @@ unsafe fn add_team_menu(menu: ObjcId, controller: ObjcId, team: &TeamSnapshot) {
         accessibilityDescription: ns_string("Team"),
     ];
     if image != NIL {
-        send_void![item, setImage: image];
+        set_menu_item_image(item, image);
     }
     send_void![item, setEnabled: Bool::NO];
     send_void![menu, addItem: item];
@@ -388,7 +388,7 @@ unsafe fn add_project_menu(menu: ObjcId, controller: ObjcId, project: &ProjectSn
         "Deployment status",
     );
     if status_image != NIL {
-        send_void![project_item, setImage: status_image];
+        set_menu_item_image(project_item, status_image);
     }
 
     unsafe fn colored_symbol_image(symbol: &str, color: ObjcId, description: &str) -> ObjcId {
@@ -405,7 +405,9 @@ unsafe fn add_project_menu(menu: ObjcId, controller: ObjcId, project: &ProjectSn
             configurationWithHierarchicalColor: color
         ];
         let configured: ObjcId = msg_send![image, imageWithSymbolConfiguration: configuration];
-        if configured == NIL { image } else { configured }
+        let configured = if configured == NIL { image } else { configured };
+        send_void![configured, setTemplate: Bool::NO];
+        configured
     }
     let project_menu = new_menu();
     send_void![project_menu, setAutoenablesItems: Bool::NO];
@@ -437,6 +439,11 @@ unsafe fn add_project_menu(menu: ObjcId, controller: ObjcId, project: &ProjectSn
 
     send_void![project_item, setSubmenu: project_menu];
     send_void![menu, addItem: project_item];
+}
+
+unsafe fn set_menu_item_image(item: ObjcId, image: ObjcId) {
+    send_void![item, setImage: image];
+    send_void![item, setPreferredImageVisibility: 1i64];
 }
 
 fn cache_snapshot(snapshot: AppSnapshot) {
@@ -499,7 +506,7 @@ unsafe fn add_static_item(menu: ObjcId, title: &str) {
             accessibilityDescription: ns_string("Information"),
         ];
         if image != NIL {
-            send_void![item, setImage: image];
+            set_menu_item_image(item, image);
         }
     }
     send_void![item, setEnabled: Bool::NO];
@@ -515,7 +522,7 @@ unsafe fn add_deployment_item(menu: ObjcId, label: &str) {
         accessibilityDescription: ns_string("Deployment date"),
     ];
     if image != NIL {
-        send_void![item, setImage: image];
+        set_menu_item_image(item, image);
     }
     send_void![item, setEnabled: Bool::NO];
     send_void![menu, addItem: item];
@@ -530,7 +537,7 @@ unsafe fn add_page_views_item(menu: ObjcId, page_views: u64) {
         accessibilityDescription: ns_string("Page views"),
     ];
     if image != NIL {
-        send_void![item, setImage: image];
+        set_menu_item_image(item, image);
     }
     send_void![item, setEnabled: Bool::NO];
     send_void![menu, addItem: item];
@@ -584,7 +591,7 @@ unsafe fn add_action_item(menu: ObjcId, title: &str, action: Sel, controller: Ob
             accessibilityDescription: ns_string(title),
         ];
         if image != NIL {
-            send_void![item, setImage: image];
+            set_menu_item_image(item, image);
         }
     }
     send_void![menu, addItem: item];
