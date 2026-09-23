@@ -27,13 +27,16 @@ const TOKEN_DEFAULTS_KEY: &str = "vercelToken";
 const SETTINGS_SAVE: i64 = 1;
 const SETTINGS_CLEAR: i64 = 2;
 const PROJECT_SORT_KEY: &str = "projectSortOrder";
+const AUTO_REFRESH_KEY: &str = "autoRefreshMinutes";
 const VISIBILITY_KEY_PREFIX: &str = "visibility";
 const SORT_LAST_DEPLOYMENT: i64 = 0;
 pub(crate) const SORT_ALPHABETICAL: i64 = 1;
+const AUTO_REFRESH_OPTIONS: [u64; 5] = [1, 5, 15, 30, 60];
 
 static SETTINGS_WINDOW: AtomicUsize = AtomicUsize::new(0);
 static SETTINGS_FIELD: AtomicUsize = AtomicUsize::new(0);
 static SETTINGS_SORT: AtomicUsize = AtomicUsize::new(0);
+static SETTINGS_REFRESH: AtomicUsize = AtomicUsize::new(0);
 static SETTINGS_RESPONSE: AtomicUsize = AtomicUsize::new(0);
 static SETTINGS_VISIBILITY: OnceCell<Mutex<Vec<(String, usize)>>> = OnceCell::new();
 static SETTINGS_CONTENT: AtomicUsize = AtomicUsize::new(0);
@@ -206,7 +209,7 @@ unsafe fn add_visibility_tree(
         container,
         initWithFrame: NSRect::new(
             NSPoint::new(56.0, 72.0),
-            NSSize::new(420.0, 218.0)
+            NSSize::new(420.0, 210.0)
         )
     ];
     send_void![container, setMaterial: 6i64];
@@ -232,7 +235,7 @@ unsafe fn add_visibility_tree(
         scroll,
         initWithFrame: NSRect::new(
             NSPoint::new(64.0, 80.0),
-            NSSize::new(404.0, 202.0)
+            NSSize::new(404.0, 194.0)
         )
     ];
     send_void![scroll, setHasVerticalScroller: Bool::YES];
@@ -279,7 +282,7 @@ pub(crate) fn show_settings_modal(controller: ObjcId) -> Result<()> {
             window,
             initWithContentRect: NSRect::new(
                 NSPoint::new(0.0, 0.0),
-                NSSize::new(500.0, 560.0),
+                NSSize::new(500.0, 600.0),
             ),
             styleMask: (1u64 | 2u64 | 32768u64),
             backing: 2u64,
@@ -301,7 +304,7 @@ pub(crate) fn show_settings_modal(controller: ObjcId) -> Result<()> {
             background,
             initWithFrame: NSRect::new(
                 NSPoint::new(0.0, 0.0),
-                NSSize::new(500.0, 560.0)
+                NSSize::new(500.0, 600.0)
             )
         ];
         send_void![background, setMaterial: 7i64];
@@ -318,11 +321,11 @@ pub(crate) fn show_settings_modal(controller: ObjcId) -> Result<()> {
             .unwrap()
             .clone_from(&snapshot);
         SETTINGS_CONTENT.store(content as usize, Ordering::Relaxed);
-        add_settings_symbol(content, "person.crop.circle", "Vercel account", 499.0);
+        add_settings_symbol(content, "person.crop.circle", "Vercel account", 531.0);
         let account_label: ObjcId =
             msg_send![class!(NSTextField), labelWithString: ns_string("Vercel Account")];
         send_void![account_label, setFrame: NSRect::new(
-            NSPoint::new(56.0, 498.0), NSSize::new(300.0, 24.0)
+            NSPoint::new(56.0, 530.0), NSSize::new(300.0, 24.0)
         )];
         let heading_font = settings_heading_font();
         send_void![account_label, setFont: heading_font];
@@ -331,7 +334,7 @@ pub(crate) fn show_settings_modal(controller: ObjcId) -> Result<()> {
             "Vercel token (used to load teams and projects):"
         )];
         send_void![label, setFrame: NSRect::new(
-            NSPoint::new(56.0, 472.0), NSSize::new(420.0, 20.0)
+            NSPoint::new(56.0, 504.0), NSSize::new(420.0, 20.0)
         )];
         let secondary_color: ObjcId = msg_send![class!(NSColor), secondaryLabelColor];
         send_void![label, setTextColor: secondary_color];
@@ -339,7 +342,7 @@ pub(crate) fn show_settings_modal(controller: ObjcId) -> Result<()> {
 
         let text_field: ObjcId = msg_send![class!(NSSecureTextField), alloc];
         let text_field: ObjcId = msg_send![text_field, initWithFrame: NSRect::new(
-            NSPoint::new(56.0, 428.0), NSSize::new(420.0, 36.0)
+            NSPoint::new(56.0, 460.0), NSSize::new(420.0, 36.0)
         )];
         send_void![text_field, setEditable: Bool::YES];
         send_void![text_field, setSelectable: Bool::YES];
@@ -356,7 +359,7 @@ pub(crate) fn show_settings_modal(controller: ObjcId) -> Result<()> {
         ))
         .cast();
         send_void![clear, setFrame: NSRect::new(
-            NSPoint::new(56.0, 388.0), NSSize::new(120.0, 28.0)
+            NSPoint::new(56.0, 420.0), NSSize::new(120.0, 28.0)
         )];
         let trash: ObjcId = msg_send![
             class!(NSImage),
@@ -378,7 +381,7 @@ pub(crate) fn show_settings_modal(controller: ObjcId) -> Result<()> {
         ))
         .cast();
         send_void![generate, setFrame: NSRect::new(
-            NSPoint::new(336.0, 388.0), NSSize::new(140.0, 28.0)
+            NSPoint::new(336.0, 420.0), NSSize::new(140.0, 28.0)
         )];
         let external_link: ObjcId = msg_send![
             class!(NSImage),
@@ -392,25 +395,25 @@ pub(crate) fn show_settings_modal(controller: ObjcId) -> Result<()> {
         }
         send_void![content, addSubview: generate];
 
-        add_settings_symbol(content, "square.grid.2x2", "Projects display", 337.0);
+        add_settings_symbol(content, "square.grid.2x2", "Projects display", 369.0);
         let display_label: ObjcId =
             msg_send![class!(NSTextField), labelWithString: ns_string("Projects Display")];
         send_void![display_label, setFrame: NSRect::new(
-            NSPoint::new(56.0, 336.0), NSSize::new(420.0, 24.0)
+            NSPoint::new(56.0, 368.0), NSSize::new(420.0, 24.0)
         )];
         send_void![display_label, setFont: heading_font];
         send_void![content, addSubview: display_label];
         let sort_label: ObjcId =
             msg_send![class!(NSTextField), labelWithString: ns_string("Projects sort order")];
         send_void![sort_label, setFrame: NSRect::new(
-            NSPoint::new(56.0, 302.0), NSSize::new(160.0, 22.0)
+            NSPoint::new(56.0, 298.0), NSSize::new(160.0, 22.0)
         )];
         send_void![content, addSubview: sort_label];
         let sort_popup: ObjcId = msg_send![class!(NSPopUpButton), alloc];
         let sort_popup: ObjcId = msg_send![
             sort_popup,
             initWithFrame: NSRect::new(
-                NSPoint::new(270.0, 302.0),
+                NSPoint::new(270.0, 298.0),
                 NSSize::new(206.0, 28.0),
             ),
             pullsDown: Bool::NO,
@@ -421,6 +424,35 @@ pub(crate) fn show_settings_modal(controller: ObjcId) -> Result<()> {
         send_void![sort_popup, addItemWithTitle: ns_string("Alphabetically")];
         send_void![sort_popup, selectItemAtIndex: project_sort_order()];
         send_void![content, addSubview: sort_popup];
+        let refresh_label: ObjcId =
+            msg_send![class!(NSTextField), labelWithString: ns_string("Auto-refresh")];
+        send_void![refresh_label, setFrame: NSRect::new(
+            NSPoint::new(56.0, 332.0), NSSize::new(160.0, 22.0)
+        )];
+        send_void![content, addSubview: refresh_label];
+        let refresh_popup: ObjcId = msg_send![class!(NSPopUpButton), alloc];
+        let refresh_popup: ObjcId = msg_send![
+            refresh_popup,
+            initWithFrame: NSRect::new(
+                NSPoint::new(270.0, 334.0),
+                NSSize::new(206.0, 28.0),
+            ),
+            pullsDown: Bool::NO,
+        ];
+        for minutes in AUTO_REFRESH_OPTIONS {
+            send_void![
+                refresh_popup,
+                addItemWithTitle: ns_string(&format!("{minutes} minutes"))
+            ];
+        }
+        send_void![
+            refresh_popup,
+            selectItemAtIndex: AUTO_REFRESH_OPTIONS
+                .iter()
+                .position(|option| *option == auto_refresh_minutes())
+                .unwrap_or(1) as i64
+        ];
+        send_void![content, addSubview: refresh_popup];
         let tree = add_visibility_tree(content, snapshot.as_ref(), project_sort_order());
         SETTINGS_TREE.store(tree as usize, Ordering::Relaxed);
 
@@ -431,7 +463,7 @@ pub(crate) fn show_settings_modal(controller: ObjcId) -> Result<()> {
             action: sel!(settingsCancel:),
         ];
         send_void![cancel, setFrame: NSRect::new(
-            NSPoint::new(330.0, 20.0), NSSize::new(70.0, 32.0)
+            NSPoint::new(326.0, 20.0), NSSize::new(70.0, 32.0)
         )];
         let save: ObjcId = msg_send![
             class!(NSButton),
@@ -440,7 +472,7 @@ pub(crate) fn show_settings_modal(controller: ObjcId) -> Result<()> {
             action: sel!(settingsSave:),
         ];
         send_void![save, setFrame: NSRect::new(
-            NSPoint::new(414.0, 20.0), NSSize::new(70.0, 32.0)
+            NSPoint::new(406.0, 20.0), NSSize::new(70.0, 32.0)
         )];
         send_void![save, setKeyEquivalent: ns_string("\r")];
         send_void![save, setKeyEquivalentModifierMask: 0u64];
@@ -452,6 +484,7 @@ pub(crate) fn show_settings_modal(controller: ObjcId) -> Result<()> {
         SETTINGS_WINDOW.store(window as usize, Ordering::Relaxed);
         SETTINGS_FIELD.store(text_field as usize, Ordering::Relaxed);
         SETTINGS_SORT.store(sort_popup as usize, Ordering::Relaxed);
+        SETTINGS_REFRESH.store(refresh_popup as usize, Ordering::Relaxed);
         SETTINGS_RESPONSE.store(0, Ordering::Relaxed);
         send_void![window, makeKeyAndOrderFront: NIL];
         let _: Bool = msg_send![window, makeFirstResponder: NIL];
@@ -461,6 +494,7 @@ pub(crate) fn show_settings_modal(controller: ObjcId) -> Result<()> {
         SETTINGS_WINDOW.store(0, Ordering::Relaxed);
         SETTINGS_FIELD.store(0, Ordering::Relaxed);
         SETTINGS_SORT.store(0, Ordering::Relaxed);
+        SETTINGS_REFRESH.store(0, Ordering::Relaxed);
         SETTINGS_CONTENT.store(0, Ordering::Relaxed);
         SETTINGS_TREE.store(0, Ordering::Relaxed);
         if response == SETTINGS_SAVE {
@@ -599,6 +633,14 @@ pub(crate) extern "C" fn settings_save(_: ObjcId, _: Sel, _: ObjcId) {
                 let sort_popup = SETTINGS_SORT.load(Ordering::Relaxed) as ObjcId;
                 let sort: i64 = msg_send![sort_popup, indexOfSelectedItem];
                 set_project_sort_order(sort);
+                let refresh_popup = SETTINGS_REFRESH.load(Ordering::Relaxed) as ObjcId;
+                let refresh_index: i64 = msg_send![refresh_popup, indexOfSelectedItem];
+                set_auto_refresh_minutes(
+                    AUTO_REFRESH_OPTIONS
+                        .get(refresh_index as usize)
+                        .copied()
+                        .unwrap_or(5),
+                );
                 let defaults: ObjcId = msg_send![class!(NSUserDefaults), standardUserDefaults];
                 for (key, button) in visibility_defaults().lock().unwrap().iter() {
                     let button = *button as ObjcId;
@@ -657,6 +699,31 @@ pub(crate) fn project_sort_order() -> i64 {
         } else {
             SORT_LAST_DEPLOYMENT
         }
+    }
+}
+
+pub(crate) fn auto_refresh_minutes() -> u64 {
+    unsafe {
+        let defaults: ObjcId = msg_send![class!(NSUserDefaults), standardUserDefaults];
+        let value: i64 = msg_send![defaults, integerForKey: ns_string(AUTO_REFRESH_KEY)];
+        let value = value as u64;
+        if AUTO_REFRESH_OPTIONS.contains(&value) {
+            value
+        } else {
+            5
+        }
+    }
+}
+
+fn set_auto_refresh_minutes(minutes: u64) {
+    unsafe {
+        let defaults: ObjcId = msg_send![class!(NSUserDefaults), standardUserDefaults];
+        send_void![
+            defaults,
+            setInteger: minutes as i64,
+            forKey: ns_string(AUTO_REFRESH_KEY),
+        ];
+        let _: Bool = msg_send![defaults, synchronize];
     }
 }
 

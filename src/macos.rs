@@ -21,16 +21,15 @@ use std::{
 };
 
 use crate::settings::{
-    SORT_ALPHABETICAL, VERCEL_TOKEN_SETTINGS_URL, is_visible, load_token, project_sort_order,
-    settings_cancel, settings_clear, settings_save, settings_sort_changed, show_settings_modal,
-    visibility_key,
+    SORT_ALPHABETICAL, VERCEL_TOKEN_SETTINGS_URL, auto_refresh_minutes, is_visible, load_token,
+    project_sort_order, settings_cancel, settings_clear, settings_save, settings_sort_changed,
+    show_settings_modal, visibility_key,
 };
 use crate::vercel::{AppSnapshot, ProjectSnapshot, TeamSnapshot, VercelClient};
 
 pub(crate) type ObjcId = *mut AnyObject;
 pub(crate) const NIL: ObjcId = std::ptr::null_mut();
 
-const CACHE_TTL: Duration = Duration::from_secs(300);
 const COMMAND_MODIFIER_MASK: u64 = 1 << 20;
 
 static SNAPSHOT_CACHE: OnceCell<Mutex<Option<(Instant, AppSnapshot)>>> = OnceCell::new();
@@ -95,11 +94,11 @@ pub fn run() {
         ];
         let _: ObjcId = msg_send![
             class!(NSTimer),
-            scheduledTimerWithTimeInterval: 300.0f64,
+            scheduledTimerWithTimeInterval: auto_refresh_minutes() as f64 * 60.0,
             target: controller,
             selector: sel!(autoRefresh:),
             userInfo: NIL,
-            repeats: Bool::YES,
+            repeats: Bool::NO,
         ];
 
         let lifetime = Box::new(AppLifetime {
@@ -334,14 +333,19 @@ unsafe fn rebuild_menu(menu: ObjcId, controller: ObjcId) {
 }
 
 extern "C" fn auto_refresh(this: ObjcId, _: Sel, _: ObjcId) {
-    if cached_snapshot().is_some() {
-        return;
-    }
     unsafe {
         let menu = APP_MENU.load(Ordering::Relaxed) as ObjcId;
-        if menu != NIL {
+        if menu != NIL && cached_snapshot().is_none() {
             rebuild_menu(menu, this);
         }
+        let _: ObjcId = msg_send![
+            class!(NSTimer),
+            scheduledTimerWithTimeInterval: auto_refresh_minutes() as f64 * 60.0,
+            target: this,
+            selector: sel!(autoRefresh:),
+            userInfo: NIL,
+            repeats: Bool::NO,
+        ];
     }
 }
 
@@ -565,7 +569,7 @@ pub(crate) fn cached_snapshot() -> Option<AppSnapshot> {
     let guard = cache.lock().unwrap();
     guard
         .as_ref()
-        .filter(|(time, _)| time.elapsed() < CACHE_TTL)
+        .filter(|(time, _)| time.elapsed() < Duration::from_secs(auto_refresh_minutes() * 60))
         .map(|(_, snapshot)| snapshot.clone())
 }
 
@@ -825,7 +829,7 @@ fn open_url(url: &str) -> Result<()> {
 }
 
 pub(crate) unsafe fn ns_string(value: &str) -> ObjcId {
-    objc2::rc::Retained::into_raw(NSString::from_str(value)) as ObjcId
+    Retained::into_raw(NSString::from_str(value)) as ObjcId
 }
 
 pub(crate) unsafe fn ns_string_to_rust(value: ObjcId) -> String {
