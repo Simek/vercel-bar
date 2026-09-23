@@ -218,6 +218,98 @@ extern "C" fn open_token_settings(_: ObjcId, _: Sel, _: ObjcId) {
     }
 }
 
+extern "C" fn redeploy_production(this: ObjcId, _: Sel, sender: ObjcId) {
+    unsafe {
+        let represented: ObjcId = msg_send![sender, representedObject];
+        if represented == NIL {
+            return;
+        }
+        let parts = ns_string_to_rust(represented);
+        let mut fields = parts.splitn(3, '|');
+        let Some(deployment_id) = fields.next().filter(|value| !value.is_empty()) else {
+            show_error_alert(
+                "Failed to redeploy production",
+                "The deployment ID is missing.",
+            );
+            return;
+        };
+        let team_id = fields.next().filter(|value| !value.is_empty());
+        let Some(project_name) = fields.next().filter(|value| !value.is_empty()) else {
+            show_error_alert(
+                "Failed to redeploy production",
+                "The project name is missing.",
+            );
+            return;
+        };
+        let alert: ObjcId = msg_send![class!(NSAlert), new];
+        let app_icon: ObjcId = msg_send![class!(NSImage), imageNamed: ns_string("VercelBar")];
+        if app_icon != NIL {
+            send_void![alert, setIcon: app_icon];
+        }
+        send_void![alert, setMessageText: ns_string("Redeploy production?")];
+        send_void![
+            alert,
+            setInformativeText: ns_string(
+                "This will trigger a new build of the current production deployment."
+            )
+        ];
+        let _: ObjcId = msg_send![alert, addButtonWithTitle: ns_string("Redeploy")];
+        let _: ObjcId = msg_send![alert, addButtonWithTitle: ns_string("Cancel")];
+        let response: i64 = msg_send![alert, runModal];
+        if response != 1000 {
+            return;
+        }
+
+        send_void![alert, setMessageText: ns_string("Redeploying production…")];
+        send_void![
+            alert,
+            setInformativeText: ns_string("Waiting for Vercel to start the redeployment.")
+        ];
+        let loading_button: ObjcId = msg_send![alert, buttons];
+        let loading_button: ObjcId = msg_send![loading_button, objectAtIndex: 0usize];
+        send_void![loading_button, setTitle: ns_string("Redeploying…")];
+        send_void![loading_button, setEnabled: Bool::NO];
+        let cancel_button: ObjcId = msg_send![alert, buttons];
+        let cancel_button: ObjcId = msg_send![cancel_button, objectAtIndex: 1usize];
+        send_void![cancel_button, setHidden: Bool::YES];
+        let result = load_token()
+            .and_then(|token| {
+                token.map_or_else(
+                    || Err(anyhow::anyhow!("No Vercel token configured")),
+                    |token| VercelClient::new(token),
+                )
+            })
+            .and_then(|client| client.redeploy(deployment_id, project_name, team_id));
+        let (title, message) = match &result {
+            Ok(()) => (
+                "Production redeploy started",
+                "Vercel is redeploying the current production deployment.".to_owned(),
+            ),
+            Err(err) => ("Failed to redeploy production", err.to_string()),
+        };
+        send_void![alert, setMessageText: ns_string(title)];
+        send_void![alert, setInformativeText: ns_string(&message)];
+        send_void![loading_button, setTitle: ns_string("OK")];
+        send_void![loading_button, setEnabled: Bool::YES];
+        let _: i64 = msg_send![alert, runModal];
+        if result.is_ok() {
+            clear_snapshot_cache();
+            let menu = APP_MENU.load(Ordering::Relaxed) as ObjcId;
+            if menu != NIL {
+                set_status_icon_for_item("arrow.3.trianglepath");
+                let _: ObjcId = msg_send![
+                    class!(NSTimer),
+                    scheduledTimerWithTimeInterval: 0.01f64,
+                    target: this,
+                    selector: sel!(loadMenu:),
+                    userInfo: menu,
+                    repeats: Bool::NO,
+                ];
+            }
+        }
+    }
+}
+
 extern "C" fn quit_app(_: ObjcId, _: Sel, _: ObjcId) {
     unsafe {
         let app = app();
@@ -423,12 +515,41 @@ unsafe fn add_project_menu(menu: ObjcId, controller: ObjcId, project: &ProjectSn
     add_separator(project_menu);
     if let Some(url) = &project.production_url {
         add_url_item(project_menu, "Open production website", url, controller);
-        add_url_item(project_menu, "Open production logs", &project.logs_url, controller);
+        add_url_item(
+            project_menu,
+            "Open production logs",
+            &project.logs_url,
+            controller,
+        );
     }
 
     add_separator(project_menu);
+    let mut has_deployment_actions = false;
     if let Some(url) = &project.latest_deployment_url {
         add_url_item(project_menu, "Open latest deployment", url, controller);
+        has_deployment_actions = true;
+    }
+    if let Some(deployment_id) = &project.latest_deployment_id {
+        let represented = format!(
+            "{}|{}|{}",
+            deployment_id,
+            project.team_id.as_deref().unwrap_or_default(),
+            project.name
+        );
+        add_represented_action_item(
+            project_menu,
+            "Redeploy production",
+            &represented,
+            sel!(redeployProduction:),
+            controller,
+            !matches!(
+                project.latest_status,
+                crate::vercel::DeploymentStatus::Pending
+            ),
+        );
+        has_deployment_actions = true;
+    }
+    if has_deployment_actions {
         add_separator(project_menu);
     }
     add_menu_header(project_menu, "Deployment information");
@@ -579,7 +700,7 @@ unsafe fn add_action_item(menu: ObjcId, title: &str, action: Sel, controller: Ob
         send_void![item, setKeyEquivalentModifierMask: COMMAND_MODIFIER_MASK];
     }
     let symbol = match title {
-        "Refresh" => Some("arrow.clockwise"),
+        "Refresh" => Some("arrow.trianglehead.2.clockwise"),
         "Settings…" => Some("gearshape"),
         "Quit" => Some("power"),
         _ => None,
@@ -607,6 +728,38 @@ unsafe fn add_url_item(menu: ObjcId, title: &str, url: &str, controller: ObjcId)
     ];
     send_void![item, setTarget: controller];
     send_void![item, setRepresentedObject: ns_string(url)];
+    send_void![menu, addItem: item];
+}
+
+unsafe fn add_represented_action_item(
+    menu: ObjcId,
+    title: &str,
+    represented: &str,
+    action: Sel,
+    controller: ObjcId,
+    enabled: bool,
+) {
+    let item: ObjcId = msg_send![class!(NSMenuItem), alloc];
+    let item: ObjcId = msg_send![
+        item,
+        initWithTitle: ns_string(title),
+        action: action,
+        keyEquivalent: ns_string(""),
+    ];
+    send_void![item, setTarget: controller];
+    send_void![item, setRepresentedObject: ns_string(represented)];
+    send_void![
+        item,
+        setEnabled: if enabled { Bool::YES } else { Bool::NO }
+    ];
+    let image: ObjcId = msg_send![
+        class!(NSImage),
+        imageWithSystemSymbolName: ns_string("arrow.uturn.right"),
+        accessibilityDescription: ns_string(title),
+    ];
+    if image != NIL {
+        set_menu_item_image(item, image);
+    }
     send_void![menu, addItem: item];
 }
 
@@ -1233,6 +1386,10 @@ fn menu_controller_class() -> &'static AnyClass {
         decl.add_method(
             sel!(openTokenSettings:),
             open_token_settings as extern "C" fn(ObjcId, Sel, ObjcId),
+        );
+        decl.add_method(
+            sel!(redeployProduction:),
+            redeploy_production as extern "C" fn(ObjcId, Sel, ObjcId),
         );
         decl.add_method(
             sel!(quitApp:),

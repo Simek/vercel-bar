@@ -51,8 +51,8 @@
 		00000000000000000000000A = { isa = XCConfigurationList; buildConfigurations = (00000000000000000000000E, 00000000000000000000000F); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		00000000000000000000000C = { isa = XCBuildConfiguration; buildSettings = { SDKROOT = macosx; }; name = Debug; };
 		00000000000000000000000D = { isa = XCBuildConfiguration; buildSettings = { SDKROOT = macosx; }; name = Release; };
-		00000000000000000000000E = { isa = XCBuildConfiguration; buildSettings = { ASSETCATALOG_COMPILER_APPICON_NAME = VercelBar; INFOPLIST_FILE = "VercelBar-Info.plist"; MACOSX_DEPLOYMENT_TARGET = 10.15; PRODUCT_NAME = VercelBar; SDKROOT = macosx; WRAPPER_EXTENSION = app; }; name = Debug; };
-		00000000000000000000000F = { isa = XCBuildConfiguration; buildSettings = { ASSETCATALOG_COMPILER_APPICON_NAME = VercelBar; INFOPLIST_FILE = "VercelBar-Info.plist"; MACOSX_DEPLOYMENT_TARGET = 10.15; PRODUCT_NAME = VercelBar; SDKROOT = macosx; WRAPPER_EXTENSION = app; }; name = Release; };
+		00000000000000000000000E = { isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; ASSETCATALOG_COMPILER_APPICON_NAME = VercelBar; INFOPLIST_FILE = "VercelBar-Info.plist"; MACOSX_DEPLOYMENT_TARGET = 12.0; PRODUCT_NAME = VercelBar; SDKROOT = macosx; WRAPPER_EXTENSION = app; }; name = Debug; };
+		00000000000000000000000F = { isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; ASSETCATALOG_COMPILER_APPICON_NAME = VercelBar; INFOPLIST_FILE = "VercelBar-Info.plist"; MACOSX_DEPLOYMENT_TARGET = 12.0; PRODUCT_NAME = VercelBar; SDKROOT = macosx; WRAPPER_EXTENSION = app; }; name = Release; };
 	};
 	rootObject = 000000000000000000000001;
 }

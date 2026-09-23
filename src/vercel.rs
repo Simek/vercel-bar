@@ -26,6 +26,8 @@ pub struct ProjectSnapshot {
     pub production_url: Option<String>,
     pub latest_status: DeploymentStatus,
     pub latest_status_label: String,
+    pub latest_deployment_id: Option<String>,
+    pub team_id: Option<String>,
     pub page_views: Option<u64>,
     latest_deployment_at: Option<i64>,
 }
@@ -64,6 +66,26 @@ impl VercelClient {
     pub fn validate_token(&self) -> Result<()> {
         let _: UserResponse = self.get_json("/v2/user", &[])?;
         Ok(())
+    }
+
+    pub fn redeploy(
+        &self,
+        deployment_id: &str,
+        project_name: &str,
+        team_id: Option<&str>,
+    ) -> Result<()> {
+        let mut query = vec![("forceNew", "1".to_owned())];
+        if let Some(team_id) = team_id {
+            query.push(("teamId", team_id.to_owned()));
+        }
+        let body = serde_json::json!({
+            "deploymentId": deployment_id,
+            "meta": { "action": "redeploy" },
+            "name": project_name,
+            "target": "production",
+        });
+        self.post_json_body("/v13/deployments", &query, &body)
+            .map(|_: serde_json::Value| ())
     }
 
     pub fn fetch_snapshot(&self) -> Result<AppSnapshot> {
@@ -143,7 +165,7 @@ impl VercelClient {
                 let page_views = self
                     .fetch_page_views(project_id, team_id, Some(scope_slug))
                     .ok();
-                ProjectSnapshot::from_api(project, scope_slug, page_views)
+                ProjectSnapshot::from_api(project, scope_slug, page_views, team_id)
             })
             .collect::<Vec<_>>();
         snapshots.sort_by(|left, right| {
@@ -205,6 +227,34 @@ impl VercelClient {
             .json()
             .with_context(|| format!("Failed to decode Vercel response from {path}"))
     }
+
+    fn post_json_body<T>(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+        body: &serde_json::Value,
+    ) -> Result<T>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        let response = self
+            .client
+            .post(format!("{API_BASE}{path}"))
+            .query(query)
+            .json(body)
+            .send()
+            .with_context(|| format!("Failed to call Vercel endpoint {path}"))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().unwrap_or_default();
+            return Err(anyhow!("Vercel API {path} failed with {status}: {body}"));
+        }
+
+        response
+            .json()
+            .with_context(|| format!("Failed to decode Vercel response from {path}"))
+    }
 }
 
 impl ProjectSnapshot {
@@ -212,7 +262,12 @@ impl ProjectSnapshot {
         self.latest_deployment_at
     }
 
-    fn from_api(project: Project, scope_slug: &str, page_views: Option<u64>) -> Self {
+    fn from_api(
+        project: Project,
+        scope_slug: &str,
+        page_views: Option<u64>,
+        team_id: Option<&str>,
+    ) -> Self {
         let dashboard_url = format!("https://vercel.com/{scope_slug}/{}", project.name);
         let logs_url = format!("{dashboard_url}/logs");
         let latest = project.latest_deployment();
@@ -230,12 +285,7 @@ impl ProjectSnapshot {
             .or_else(|| {
                 latest
                     .as_ref()
-                    .and_then(|deployment| {
-                        deployment
-                            .uid
-                            .as_deref()
-                            .or(deployment.id.as_deref())
-                    })
+                    .and_then(|deployment| deployment.uid.as_deref().or(deployment.id.as_deref()))
                     .map(|deployment_id| format!("{dashboard_url}/{deployment_id}"))
             });
         let production_url = latest.as_ref().and_then(Deployment::production_url);
@@ -248,6 +298,12 @@ impl ProjectSnapshot {
             production_url,
             latest_status,
             latest_status_label,
+            latest_deployment_id: latest.as_ref().and_then(|deployment| {
+                (deployment.target.as_deref() == Some("production"))
+                    .then(|| deployment.uid.clone().or(deployment.id.clone()))
+                    .flatten()
+            }),
+            team_id: team_id.map(str::to_owned),
             page_views,
             latest_deployment_at: latest.as_ref().and_then(|deployment| deployment.created_at),
         }
