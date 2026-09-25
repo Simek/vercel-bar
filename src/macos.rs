@@ -74,7 +74,7 @@ pub fn run() {
         STATUS_ITEM.store(status_item as usize, Ordering::Relaxed);
 
         let button: ObjcId = msg_send![status_item, button];
-        set_status_icon(button, "triangle.fill");
+        set_status_icon(button, "arrow.3.trianglepath");
 
         let menu = new_menu();
         send_void![menu, setAutoenablesItems: Bool::NO];
@@ -86,7 +86,7 @@ pub fn run() {
 
         let _: ObjcId = msg_send![
             class!(NSTimer),
-            scheduledTimerWithTimeInterval: 0.01f64,
+            scheduledTimerWithTimeInterval: 0.05f64,
             target: controller,
             selector: sel!(loadMenu:),
             userInfo: menu,
