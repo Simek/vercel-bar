@@ -540,7 +540,7 @@ unsafe fn add_project_menu(menu: ObjcId, controller: ObjcId, project: &ProjectSn
     }
     add_menu_header(project_menu, "Deployment information");
     add_deployment_item(project_menu, &project.latest_status_label);
-    if let Some(page_views) = project.page_views {
+    if let Some(page_views) = project.page_views.filter(|&page_views| page_views > 0) {
         add_page_views_item(project_menu, page_views);
     }
 
