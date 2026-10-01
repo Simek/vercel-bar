@@ -1,10 +1,10 @@
-# Vercel Bar
+# VercelBar
 
-A macOS menu-bar app for monitoring Vercel teams and projects. View deployment status, recent deployments, analytics details. Open project subpages, or redeploy production with one click.
+A macOS menu-bar app for monitoring Vercel teams and projects. View deployment status, recent deployments, analytics details, open project subpages, or redeploy production with one click.
 
 ## Setup
 
-Launch app, add a Vercel API token in **Settings**. 
+Launch app, add a Vercel API token in **Settings**, select teams and projects you want tot monitor.
 
 ## Contributing
 
