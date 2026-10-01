@@ -293,6 +293,7 @@ pub(crate) fn show_settings_modal(controller: ObjcId) -> Result<()> {
         send_void![window, setTitleVisibility: 0i64];
         send_void![window, setReleasedWhenClosed: Bool::NO];
         send_void![window, setInitialFirstResponder: NIL];
+        send_void![window, setDelegate: controller];
         let close_button: ObjcId = msg_send![window, standardWindowButton: 2i64];
         send_void![close_button, setTarget: controller];
         send_void![close_button, setAction: sel!(settingsCancel:)];

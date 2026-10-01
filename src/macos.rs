@@ -903,11 +903,19 @@ fn menu_controller_class() -> &'static AnyClass {
             settings_cancel as extern "C" fn(ObjcId, Sel, ObjcId),
         );
         decl.add_method(
+            sel!(windowWillClose:),
+            settings_window_will_close as extern "C" fn(ObjcId, Sel, ObjcId),
+        );
+        decl.add_method(
             sel!(settingsClear:),
             settings_clear as extern "C" fn(ObjcId, Sel, ObjcId),
         );
         decl.register()
     })
+}
+
+extern "C" fn settings_window_will_close(this: ObjcId, _: Sel, _: ObjcId) {
+    settings_cancel(this, sel!(settingsCancel:), NIL);
 }
 
 extern "C" fn noop(_: ObjcId, _: Sel, _: ObjcId) {}
