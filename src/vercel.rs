@@ -89,6 +89,13 @@ impl VercelClient {
     }
 
     pub fn fetch_snapshot(&self) -> Result<AppSnapshot> {
+        self.fetch_snapshot_with_page_views_filter(|_, _| true)
+    }
+
+    pub fn fetch_snapshot_with_page_views_filter(
+        &self,
+        should_fetch_page_views: impl Fn(&str, &str) -> bool,
+    ) -> Result<AppSnapshot> {
         self.get_json::<UserResponse>("/v2/user", &[])?;
         // Team listing can be unavailable for tokens scoped only to personal
         // projects; personal projects should still be shown in that case.
@@ -100,8 +107,13 @@ impl VercelClient {
         for team in teams.teams {
             let name = team.name.clone().unwrap_or_else(|| team.slug.clone());
             snapshots.push(TeamSnapshot {
+                projects: self.fetch_projects(
+                    Some(&team.id),
+                    &team.slug,
+                    &name,
+                    &should_fetch_page_views,
+                )?,
                 name,
-                projects: self.fetch_projects(Some(&team.id), &team.slug)?,
             });
         }
 
@@ -119,6 +131,8 @@ impl VercelClient {
         &self,
         team_id: Option<&str>,
         scope_slug: &str,
+        team_name: &str,
+        should_fetch_page_views: &impl Fn(&str, &str) -> bool,
     ) -> Result<Vec<ProjectSnapshot>> {
         let mut all_projects = Vec::new();
         let mut next: Option<i64> = None;
@@ -162,9 +176,12 @@ impl VercelClient {
             .into_iter()
             .map(|project| {
                 let project_id = project.id.as_deref().unwrap_or(&project.name);
-                let page_views = self
-                    .fetch_page_views(project_id, team_id, Some(scope_slug))
-                    .ok();
+                let page_views = should_fetch_page_views(team_name, &project.name)
+                    .then(|| {
+                        self.fetch_page_views(project_id, team_id, Some(scope_slug))
+                            .ok()
+                    })
+                    .flatten();
                 ProjectSnapshot::from_api(project, scope_slug, page_views, team_id)
             })
             .collect::<Vec<_>>();

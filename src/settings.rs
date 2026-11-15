@@ -38,11 +38,18 @@ static SETTINGS_FIELD: AtomicUsize = AtomicUsize::new(0);
 static SETTINGS_SORT: AtomicUsize = AtomicUsize::new(0);
 static SETTINGS_REFRESH: AtomicUsize = AtomicUsize::new(0);
 static SETTINGS_RESPONSE: AtomicUsize = AtomicUsize::new(0);
-static SETTINGS_VISIBILITY: OnceCell<Mutex<Vec<(String, usize)>>> = OnceCell::new();
+struct VisibilityControl {
+    key: String,
+    button: usize,
+    team_name: String,
+    is_team: bool,
+}
+
+static SETTINGS_VISIBILITY: OnceCell<Mutex<Vec<VisibilityControl>>> = OnceCell::new();
 static SETTINGS_CONTENT: AtomicUsize = AtomicUsize::new(0);
 static SETTINGS_TREE: AtomicUsize = AtomicUsize::new(0);
 static SETTINGS_SNAPSHOT: OnceCell<Mutex<Option<AppSnapshot>>> = OnceCell::new();
-static SETTINGS_PENDING_VISIBILITY: OnceCell<Mutex<Vec<(String, bool)>>> = OnceCell::new();
+static SETTINGS_PENDING_VISIBILITY: OnceCell<Mutex<Vec<(String, i64)>>> = OnceCell::new();
 static SETTINGS_ORIGINAL_TOKEN: OnceCell<Mutex<Option<String>>> = OnceCell::new();
 
 macro_rules! send_void {
@@ -97,7 +104,7 @@ pub(crate) fn visibility_key(kind: &str, name: &str) -> String {
     format!("{VISIBILITY_KEY_PREFIX}.{kind}.{name}")
 }
 
-fn visibility_defaults() -> &'static Mutex<Vec<(String, usize)>> {
+fn visibility_defaults() -> &'static Mutex<Vec<VisibilityControl>> {
     SETTINGS_VISIBILITY.get_or_init(|| Mutex::new(Vec::new()))
 }
 
@@ -108,28 +115,40 @@ pub(crate) unsafe fn is_visible(key: &str) -> bool {
     value == NIL || stored
 }
 
-fn pending_visibility() -> &'static Mutex<Vec<(String, bool)>> {
+fn pending_visibility() -> &'static Mutex<Vec<(String, i64)>> {
     SETTINGS_PENDING_VISIBILITY.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-unsafe fn add_visibility_checkbox(parent: ObjcId, title: &str, key: String, x: f64, y: f64) {
+unsafe fn add_visibility_checkbox(
+    parent: ObjcId,
+    title: &str,
+    key: String,
+    team_name: &str,
+    is_team: bool,
+    controller: ObjcId,
+    x: f64,
+    y: f64,
+) -> ObjcId {
     let mtm = MainThreadMarker::new().expect("AppKit must run on the main thread");
     let button: ObjcId = Retained::into_raw(NSButton::buttonWithTitle_target_action(
         &*NSString::from_str(title),
-        None,
-        None,
+        Some(&*(controller as *const AnyObject)),
+        Some(sel!(settingsVisibilityChanged:)),
         mtm,
     ))
     .cast();
     send_void![button, setButtonType: 3i64];
-    let checked = pending_visibility()
+    let state = pending_visibility()
         .lock()
         .unwrap()
         .iter()
         .find(|(pending_key, _)| pending_key == &key)
-        .map(|(_, checked)| *checked)
-        .unwrap_or_else(|| is_visible(&key));
-    send_void![button, setState: if checked { 1i64 } else { 0i64 }];
+        .map(|(_, state)| *state)
+        .unwrap_or_else(|| if is_visible(&key) { 1i64 } else { 0i64 });
+    if is_team {
+        send_void![button, setAllowsMixedState: Bool::YES];
+    }
+    send_void![button, setState: state];
     send_void![button, setFrame: NSRect::new(
         NSPoint::new(x, y),
         NSSize::new(380.0, 24.0)
@@ -138,13 +157,20 @@ unsafe fn add_visibility_checkbox(parent: ObjcId, title: &str, key: String, x: f
     visibility_defaults()
         .lock()
         .unwrap()
-        .push((key, button as usize));
+        .push(VisibilityControl {
+            key,
+            button: button as usize,
+            team_name: team_name.to_owned(),
+            is_team,
+        });
+    button
 }
 
 unsafe fn add_visibility_tree(
     content: ObjcId,
     snapshot: Option<&AppSnapshot>,
     sort_order: i64,
+    controller: ObjcId,
 ) -> ObjcId {
     let document_height = snapshot
         .map(|snapshot| {
@@ -173,6 +199,9 @@ unsafe fn add_visibility_tree(
                 document,
                 &team.name,
                 visibility_key("team", &team.name),
+                &team.name,
+                true,
+                controller,
                 8.0,
                 y,
             );
@@ -188,11 +217,15 @@ unsafe fn add_visibility_tree(
                     document,
                     &project.name,
                     visibility_key("project", &format!("{}::{}", team.name, project.name)),
+                    &team.name,
+                    false,
+                    controller,
                     28.0,
                     y,
                 );
                 y -= 26.0;
             }
+            update_team_checkbox(&team.name);
         }
     } else {
         let label: ObjcId =
@@ -253,6 +286,47 @@ unsafe fn add_visibility_tree(
     send_void![scroll, reflectScrolledClipView: clip_view];
     pending_visibility().lock().unwrap().clear();
     scroll
+}
+
+unsafe fn update_team_checkbox(team_name: &str) {
+    let (team_button, project_buttons) = {
+        let controls = visibility_defaults().lock().unwrap();
+        let team_button = controls
+            .iter()
+            .find(|control| control.is_team && control.team_name == team_name)
+            .map(|control| control.button as ObjcId);
+        let project_buttons = controls
+            .iter()
+            .filter(|control| !control.is_team && control.team_name == team_name)
+            .map(|control| control.button as ObjcId)
+            .collect::<Vec<_>>();
+        (team_button, project_buttons)
+    };
+    let Some(team_button) = team_button else {
+        return;
+    };
+    if project_buttons.is_empty() {
+        return;
+    }
+    let selected_count = project_buttons
+        .iter()
+        .filter(|button| {
+            let state: i64 = msg_send![**button, state];
+            state == 1
+        })
+        .count();
+    let team_state = team_checkbox_state(selected_count, project_buttons.len());
+    send_void![team_button, setState: team_state];
+}
+
+fn team_checkbox_state(selected_count: usize, project_count: usize) -> i64 {
+    if selected_count == 0 {
+        0
+    } else if selected_count == project_count {
+        1
+    } else {
+        -1
+    }
 }
 
 pub(crate) fn show_settings_modal(controller: ObjcId) -> Result<()> {
@@ -454,7 +528,8 @@ pub(crate) fn show_settings_modal(controller: ObjcId) -> Result<()> {
                 .unwrap_or(1) as i64
         ];
         send_void![content, addSubview: refresh_popup];
-        let tree = add_visibility_tree(content, snapshot.as_ref(), project_sort_order());
+        let tree =
+            add_visibility_tree(content, snapshot.as_ref(), project_sort_order(), controller);
         SETTINGS_TREE.store(tree as usize, Ordering::Relaxed);
 
         let cancel: ObjcId = msg_send![
@@ -575,7 +650,7 @@ fn token_entry() -> Result<Entry> {
     Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT).context("Failed to open keychain entry")
 }
 
-pub(crate) extern "C" fn settings_sort_changed(_: ObjcId, _: Sel, sender: ObjcId) {
+pub(crate) extern "C" fn settings_sort_changed(this: ObjcId, _: Sel, sender: ObjcId) {
     unsafe {
         let content = SETTINGS_CONTENT.load(Ordering::Relaxed) as ObjcId;
         let old_tree = SETTINGS_TREE.load(Ordering::Relaxed) as ObjcId;
@@ -588,10 +663,10 @@ pub(crate) extern "C" fn settings_sort_changed(_: ObjcId, _: Sel, sender: ObjcId
         {
             let controls = visibility_defaults().lock().unwrap();
             let mut pending = pending_visibility().lock().unwrap();
-            pending.extend(controls.iter().map(|(key, button)| {
-                let button = *button as ObjcId;
+            pending.extend(controls.iter().map(|control| {
+                let button = control.button as ObjcId;
                 let state: i64 = msg_send![button, state];
-                (key.clone(), state == 1)
+                (control.key.clone(), state)
             }));
         }
         visibility_defaults().lock().unwrap().clear();
@@ -601,8 +676,41 @@ pub(crate) extern "C" fn settings_sort_changed(_: ObjcId, _: Sel, sender: ObjcId
             .lock()
             .unwrap()
             .clone();
-        let tree = add_visibility_tree(content, snapshot.as_ref(), sort);
+        let tree = add_visibility_tree(content, snapshot.as_ref(), sort, this);
         SETTINGS_TREE.store(tree as usize, Ordering::Relaxed);
+    }
+}
+
+pub(crate) extern "C" fn settings_visibility_changed(_: ObjcId, _: Sel, sender: ObjcId) {
+    unsafe {
+        let (team_name, is_team, project_buttons) = {
+            let controls = visibility_defaults().lock().unwrap();
+            let Some(changed_control) = controls
+                .iter()
+                .find(|control| control.button == sender as usize)
+            else {
+                return;
+            };
+            let team_name = changed_control.team_name.clone();
+            let is_team = changed_control.is_team;
+            let project_buttons = controls
+                .iter()
+                .filter(|control| !control.is_team && control.team_name == team_name)
+                .map(|control| control.button as ObjcId)
+                .collect::<Vec<_>>();
+            (team_name, is_team, project_buttons)
+        };
+        if is_team {
+            let select_all = project_buttons.iter().any(|button| {
+                let state: i64 = msg_send![*button, state];
+                state != 1
+            });
+            let state = if select_all { 1i64 } else { 0i64 };
+            for button in project_buttons {
+                send_void![button, setState: state];
+            }
+        }
+        update_team_checkbox(&team_name);
     }
 }
 
@@ -643,13 +751,13 @@ pub(crate) extern "C" fn settings_save(_: ObjcId, _: Sel, _: ObjcId) {
                         .unwrap_or(5),
                 );
                 let defaults: ObjcId = msg_send![class!(NSUserDefaults), standardUserDefaults];
-                for (key, button) in visibility_defaults().lock().unwrap().iter() {
-                    let button = *button as ObjcId;
+                for control in visibility_defaults().lock().unwrap().iter() {
+                    let button = control.button as ObjcId;
                     let state: i64 = msg_send![button, state];
                     send_void![
                         defaults,
-                        setBool: state == 1i64,
-                        forKey: ns_string(key),
+                        setBool: state != 0,
+                        forKey: ns_string(&control.key),
                     ];
                 }
                 let _: Bool = msg_send![defaults, synchronize];
@@ -737,5 +845,17 @@ fn set_project_sort_order(order: i64) {
             forKey: ns_string(PROJECT_SORT_KEY),
         ];
         let _: Bool = msg_send![defaults, synchronize];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::team_checkbox_state;
+
+    #[test]
+    fn team_checkbox_reflects_project_selection() {
+        assert_eq!(team_checkbox_state(0, 3), 0);
+        assert_eq!(team_checkbox_state(3, 3), 1);
+        assert_eq!(team_checkbox_state(1, 3), -1);
     }
 }

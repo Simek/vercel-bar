@@ -23,7 +23,7 @@ use std::{
 use crate::settings::{
     SORT_ALPHABETICAL, VERCEL_TOKEN_SETTINGS_URL, auto_refresh_minutes, is_visible, load_token,
     project_sort_order, settings_cancel, settings_clear, settings_save, settings_sort_changed,
-    show_settings_modal, visibility_key,
+    settings_visibility_changed, show_settings_modal, visibility_key,
 };
 use crate::vercel::{AppSnapshot, ProjectSnapshot, TeamSnapshot, VercelClient};
 
@@ -309,7 +309,15 @@ unsafe fn rebuild_menu(menu: ObjcId, controller: ObjcId) {
             if let Some(snapshot) = cached_snapshot() {
                 populate_snapshot_menu(menu, controller, snapshot);
             } else {
-                match VercelClient::new(token).and_then(|client| client.fetch_snapshot()) {
+                match VercelClient::new(token).and_then(|client| {
+                    client.fetch_snapshot_with_page_views_filter(|team_name, project_name| {
+                        is_visible(&visibility_key("team", team_name))
+                            && is_visible(&visibility_key(
+                                "project",
+                                &format!("{team_name}::{project_name}"),
+                            ))
+                    })
+                }) {
                     Ok(snapshot) => {
                         cache_snapshot(snapshot.clone());
                         populate_snapshot_menu(menu, controller, snapshot);
@@ -897,6 +905,10 @@ fn menu_controller_class() -> &'static AnyClass {
         decl.add_method(
             sel!(settingsSortChanged:),
             settings_sort_changed as extern "C" fn(ObjcId, Sel, ObjcId),
+        );
+        decl.add_method(
+            sel!(settingsVisibilityChanged:),
+            settings_visibility_changed as extern "C" fn(ObjcId, Sel, ObjcId),
         );
         decl.add_method(
             sel!(settingsCancel:),
