@@ -2,9 +2,16 @@ use anyhow::{Context, Result, anyhow};
 use reqwest::blocking::Client;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 use serde::Deserialize;
-use std::time::Duration;
+use std::{
+    sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 const API_BASE: &str = "https://api.vercel.com";
+const MAX_CONCURRENT_REQUESTS: usize = 8;
 
 #[derive(Clone, Debug)]
 pub struct AppSnapshot {
@@ -29,6 +36,7 @@ pub struct ProjectSnapshot {
     pub latest_deployment_id: Option<String>,
     pub team_id: Option<String>,
     pub page_views: Option<u64>,
+    project_id: String,
     latest_deployment_at: Option<i64>,
 }
 
@@ -103,36 +111,57 @@ impl VercelClient {
             .get_json::<TeamsResponse>("/v2/teams", &[("limit", "100".to_owned())])
             .unwrap_or(TeamsResponse { teams: Vec::new() });
 
-        let mut snapshots = Vec::new();
-        for team in teams.teams {
+        let mut snapshots = map_concurrently(&teams.teams, |team| {
             let name = team.name.clone().unwrap_or_else(|| team.slug.clone());
-            snapshots.push(TeamSnapshot {
-                projects: self.fetch_projects(
-                    Some(&team.id),
-                    &team.slug,
-                    &name,
-                    &should_fetch_page_views,
-                )?,
-                name,
-            });
-        }
+            self.fetch_projects(Some(&team.id), &team.slug)
+                .map(|projects| (TeamSnapshot { name, projects }, team.slug.clone()))
+        })
+        .into_iter()
+        .collect::<Result<Vec<_>>>()?;
 
-        snapshots.retain(|team| !team.projects.is_empty());
-        snapshots.sort_by(|left, right| {
+        snapshots.retain(|(team, _)| !team.projects.is_empty());
+        snapshots.sort_by(|(left, _), (right, _)| {
             left.name
                 .to_ascii_lowercase()
                 .cmp(&right.name.to_ascii_lowercase())
         });
 
-        Ok(AppSnapshot { teams: snapshots })
+        let mut page_view_requests = Vec::new();
+        for (team_index, (team, team_slug)) in snapshots.iter().enumerate() {
+            for (project_index, project) in team.projects.iter().enumerate() {
+                if should_fetch_page_views(&team.name, &project.name) {
+                    page_view_requests.push(PageViewsRequest {
+                        team_index,
+                        project_index,
+                        project_id: project.project_id.clone(),
+                        team_id: project.team_id.clone(),
+                        team_slug: team_slug.clone(),
+                    });
+                }
+            }
+        }
+
+        let page_views = map_concurrently(&page_view_requests, |request| {
+            self.fetch_page_views(
+                &request.project_id,
+                request.team_id.as_deref(),
+                Some(&request.team_slug),
+            )
+            .ok()
+        });
+        for (request, page_views) in page_view_requests.iter().zip(page_views) {
+            snapshots[request.team_index].0.projects[request.project_index].page_views = page_views;
+        }
+
+        Ok(AppSnapshot {
+            teams: snapshots.into_iter().map(|(team, _)| team).collect(),
+        })
     }
 
     fn fetch_projects(
         &self,
         team_id: Option<&str>,
         scope_slug: &str,
-        team_name: &str,
-        should_fetch_page_views: &impl Fn(&str, &str) -> bool,
     ) -> Result<Vec<ProjectSnapshot>> {
         let mut all_projects = Vec::new();
         let mut next: Option<i64> = None;
@@ -174,16 +203,7 @@ impl VercelClient {
 
         let mut snapshots = all_projects
             .into_iter()
-            .map(|project| {
-                let project_id = project.id.as_deref().unwrap_or(&project.name);
-                let page_views = should_fetch_page_views(team_name, &project.name)
-                    .then(|| {
-                        self.fetch_page_views(project_id, team_id, Some(scope_slug))
-                            .ok()
-                    })
-                    .flatten();
-                ProjectSnapshot::from_api(project, scope_slug, page_views, team_id)
-            })
+            .map(|project| ProjectSnapshot::from_api(project, scope_slug, None, team_id))
             .collect::<Vec<_>>();
         snapshots.sort_by(|left, right| {
             right
@@ -274,6 +294,55 @@ impl VercelClient {
     }
 }
 
+struct PageViewsRequest {
+    team_index: usize,
+    project_index: usize,
+    project_id: String,
+    team_id: Option<String>,
+    team_slug: String,
+}
+
+fn map_concurrently<T, R>(items: &[T], map: impl Fn(&T) -> R + Sync) -> Vec<R>
+where
+    T: Sync,
+    R: Send,
+{
+    if items.is_empty() {
+        return Vec::new();
+    }
+
+    let next_index = AtomicUsize::new(0);
+    let results = Mutex::new(
+        std::iter::repeat_with(|| None)
+            .take(items.len())
+            .collect::<Vec<Option<R>>>(),
+    );
+    std::thread::scope(|scope| {
+        for _ in 0..items.len().min(MAX_CONCURRENT_REQUESTS) {
+            let map = &map;
+            let next_index = &next_index;
+            let results = &results;
+            scope.spawn(move || {
+                loop {
+                    let index = next_index.fetch_add(1, Ordering::Relaxed);
+                    let Some(item) = items.get(index) else {
+                        break;
+                    };
+                    let result = map(item);
+                    results.lock().unwrap()[index] = Some(result);
+                }
+            });
+        }
+    });
+
+    results
+        .into_inner()
+        .unwrap()
+        .into_iter()
+        .map(|result| result.expect("concurrent worker did not produce a result"))
+        .collect()
+}
+
 impl ProjectSnapshot {
     pub fn latest_deployment_at(&self) -> Option<i64> {
         self.latest_deployment_at
@@ -306,6 +375,7 @@ impl ProjectSnapshot {
                     .map(|deployment_id| format!("{dashboard_url}/{deployment_id}"))
             });
         let production_url = latest.as_ref().and_then(Deployment::production_url);
+        let project_id = project.id.clone().unwrap_or_else(|| project.name.clone());
 
         Self {
             name: project.name,
@@ -322,6 +392,7 @@ impl ProjectSnapshot {
             }),
             team_id: team_id.map(str::to_owned),
             page_views,
+            project_id,
             latest_deployment_at: latest.as_ref().and_then(|deployment| deployment.created_at),
         }
     }
