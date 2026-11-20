@@ -126,12 +126,11 @@ unsafe fn add_visibility_checkbox(
     team_name: &str,
     is_team: bool,
     controller: ObjcId,
-    x: f64,
-    y: f64,
+    origin: NSPoint,
 ) -> ObjcId {
     let mtm = MainThreadMarker::new().expect("AppKit must run on the main thread");
     let button: ObjcId = Retained::into_raw(NSButton::buttonWithTitle_target_action(
-        &*NSString::from_str(title),
+        &NSString::from_str(title),
         Some(&*(controller as *const AnyObject)),
         Some(sel!(settingsVisibilityChanged:)),
         mtm,
@@ -150,7 +149,7 @@ unsafe fn add_visibility_checkbox(
     }
     send_void![button, setState: state];
     send_void![button, setFrame: NSRect::new(
-        NSPoint::new(x, y),
+        origin,
         NSSize::new(380.0, 24.0)
     )];
     send_void![parent, addSubview: button];
@@ -202,8 +201,7 @@ unsafe fn add_visibility_tree(
                 &team.name,
                 true,
                 controller,
-                8.0,
-                y,
+                NSPoint::new(8.0, y),
             );
             y -= 26.0;
             let mut projects = team.projects.clone();
@@ -220,8 +218,7 @@ unsafe fn add_visibility_tree(
                     &team.name,
                     false,
                     controller,
-                    28.0,
-                    y,
+                    NSPoint::new(28.0, y),
                 );
                 y -= 26.0;
             }
@@ -427,7 +424,7 @@ pub(crate) fn show_settings_modal(controller: ObjcId) -> Result<()> {
         send_void![content, addSubview: text_field];
 
         let clear: ObjcId = Retained::into_raw(NSButton::buttonWithTitle_target_action(
-            &*NSString::from_str("Clear Token"),
+            &NSString::from_str("Clear Token"),
             Some(&*(controller as *const AnyObject)),
             Some(sel!(settingsClear:)),
             mtm,
@@ -449,7 +446,7 @@ pub(crate) fn show_settings_modal(controller: ObjcId) -> Result<()> {
         send_void![clear, setHasDestructiveAction: Bool::YES];
         send_void![content, addSubview: clear];
         let generate: ObjcId = Retained::into_raw(NSButton::buttonWithTitle_target_action(
-            &*NSString::from_str("Generate Token"),
+            &NSString::from_str("Generate Token"),
             Some(&*(controller as *const AnyObject)),
             Some(sel!(openTokenSettings:)),
             mtm,
@@ -727,9 +724,7 @@ pub(crate) extern "C" fn settings_save(_: ObjcId, _: Sel, _: ObjcId) {
         let token_changed = original_token.as_deref() != new_token;
         let result = if token.is_empty() && token_changed {
             clear_token()
-        } else if token.is_empty() {
-            Ok(())
-        } else if original_token.as_deref() == Some(token.as_str()) {
+        } else if token.is_empty() || original_token.as_deref() == Some(token.as_str()) {
             Ok(())
         } else {
             VercelClient::new(&token)

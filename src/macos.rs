@@ -257,7 +257,7 @@ extern "C" fn redeploy_production(this: ObjcId, _: Sel, sender: ObjcId) {
             .and_then(|token| {
                 token.map_or_else(
                     || Err(anyhow::anyhow!("No Vercel token configured")),
-                    |token| VercelClient::new(token),
+                    VercelClient::new,
                 )
             })
             .and_then(|client| client.redeploy(deployment_id, project_name, team_id));

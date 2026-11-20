@@ -416,7 +416,7 @@ fn deployment_label(deployment: &Deployment) -> String {
             format!("{} ({} ago)", time.format("%Y-%m-%d %H:%M"), relative)
         })
         .unwrap_or_else(|| "unknown date".to_owned());
-    format!("{date}")
+    date.to_string()
 }
 
 #[derive(Debug, Deserialize)]
